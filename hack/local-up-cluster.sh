@@ -87,6 +87,9 @@ ENABLE_POD_PRIORITY_PREEMPTION=${ENABLE_POD_PRIORITY_PREEMPTION:-""}
 # enable kubernetes dashboard
 ENABLE_CLUSTER_DASHBOARD=${KUBE_ENABLE_CLUSTER_DASHBOARD:-false}
 
+# enable dynamic audit
+ENABLE_APISERVER_DYNAMIC_AUDIT=${ENABLE_APISERVER_DYNAMIC_AUDIT:-true}
+
 # RBAC Mode options
 AUTHORIZATION_MODE=${AUTHORIZATION_MODE:-"Node,RBAC"}
 KUBECONFIG_TOKEN=${KUBECONFIG_TOKEN:-""}
@@ -984,6 +987,10 @@ Logs:
   ${PROXY_LOG:-}
   ${SCHEDULER_LOG:-}
 EOF
+fi
+
+if [[ "${ENABLE_APISERVER_DYNAMIC_AUDIT:-}" = true ]]; then
+  echo " running with dynamic audit"
 fi
 
 if [[ "${START_MODE}" == "all" ]]; then
