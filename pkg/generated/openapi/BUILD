@@ -13,6 +13,7 @@ openapi_library(
     openapi_targets = [
         "pkg/apis/abac/v0",
         "pkg/apis/abac/v1beta1",
+        "pkg/apis/auditregistration",
         "pkg/apis/componentconfig/v1alpha1",
         "pkg/kubelet/apis/kubeletconfig/v1beta1",
         "pkg/version",
@@ -26,6 +27,7 @@ openapi_library(
         "k8s.io/api/apps/v1",
         "k8s.io/api/apps/v1beta1",
         "k8s.io/api/apps/v1beta2",
+        "k8s.io/api/auditregistration/v1alpha1",
         "k8s.io/api/authentication/v1",
         "k8s.io/api/authentication/v1beta1",
         "k8s.io/api/authorization/v1",
