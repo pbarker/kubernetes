@@ -35,6 +35,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/json"
 	"k8s.io/kubernetes/pkg/api/legacyscheme"
 	"k8s.io/kubernetes/pkg/api/testapi"
+	"k8s.io/kubernetes/pkg/apis/auditregistration"
 	api "k8s.io/kubernetes/pkg/apis/core"
 )
 
@@ -53,6 +54,10 @@ func doRoundTrip(t *testing.T, internalVersion schema.GroupVersion, externalVers
 		// because in thise test we are simply doing json operations, in which
 		// those disappear.
 		Funcs(
+			func(s *auditregistration.AuditSink, c fuzz.Continue) {
+				c.FuzzNoCustom(s)
+				s.Spec.Backend.Webhook = nil
+			},
 			func(s *api.PodSpec, c fuzz.Continue) {
 				c.FuzzNoCustom(s)
 				s.InitContainers = nil
