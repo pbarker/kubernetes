@@ -77,6 +77,7 @@ go_test(
         "//pkg/api/legacyscheme:go_default_library",
         "//pkg/api/testapi:go_default_library",
         "//pkg/api/testing/compat:go_default_library",
+        "//pkg/apis/auditregistration:go_default_library",
         "//pkg/apis/core:go_default_library",
         "//pkg/apis/core/install:go_default_library",
         "//pkg/apis/core/v1:go_default_library",
