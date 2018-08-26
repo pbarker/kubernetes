@@ -42,7 +42,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 	utilwait "k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/apiserver/pkg/admission"
-	webhookconfig "k8s.io/apiserver/pkg/admission/plugin/webhook/config"
+	admissionwebhookconfig "k8s.io/apiserver/pkg/admission/plugin/webhook/config"
 	webhookinit "k8s.io/apiserver/pkg/admission/plugin/webhook/initializer"
 	"k8s.io/apiserver/pkg/authentication/authenticator"
 	"k8s.io/apiserver/pkg/authorization/authorizer"
@@ -54,6 +54,7 @@ import (
 	"k8s.io/apiserver/pkg/storage/etcd3/preflight"
 	utilfeature "k8s.io/apiserver/pkg/util/feature"
 	apiserverflag "k8s.io/apiserver/pkg/util/flag"
+	genericwebhookconfig "k8s.io/apiserver/pkg/util/webhook/config"
 	cacheddiscovery "k8s.io/client-go/discovery/cached"
 	clientgoinformers "k8s.io/client-go/informers"
 	clientgoclientset "k8s.io/client-go/kubernetes"
@@ -448,9 +449,6 @@ func buildGenericConfig(
 	if lastErr = s.Authentication.ApplyTo(genericConfig); lastErr != nil {
 		return
 	}
-	if lastErr = s.Audit.ApplyTo(genericConfig); lastErr != nil {
-		return
-	}
 	if lastErr = s.Features.ApplyTo(genericConfig); lastErr != nil {
 		return
 	}
@@ -539,8 +537,8 @@ func buildGenericConfig(
 		genericConfig.DisabledPostStartHooks.Insert(rbacrest.PostStartHookName)
 	}
 
-	webhookAuthResolverWrapper := func(delegate webhookconfig.AuthenticationInfoResolver) webhookconfig.AuthenticationInfoResolver {
-		return &webhookconfig.AuthenticationInfoResolverDelegator{
+	admissionWebhookAuthResolverWrapper := func(delegate admissionwebhookconfig.AuthenticationInfoResolver) admissionwebhookconfig.AuthenticationInfoResolver {
+		return &admissionwebhookconfig.AuthenticationInfoResolverDelegator{
 			ClientConfigForFunc: func(server string) (*rest.Config, error) {
 				if server == "kubernetes.default.svc" {
 					return genericConfig.LoopbackClientConfig, nil
@@ -562,18 +560,43 @@ func buildGenericConfig(
 			},
 		}
 	}
+	genericWebhookAuthResolverWrapper := func(delegate genericwebhookconfig.AuthenticationInfoResolver) genericwebhookconfig.AuthenticationInfoResolver {
+		return &genericwebhookconfig.AuthenticationInfoResolverDelegator{
+			ClientConfigForFunc: func(server string) (*rest.Config, error) {
+				if server == "kubernetes.default.svc" {
+					return genericConfig.LoopbackClientConfig, nil
+				}
+				return delegate.ClientConfigFor(server)
+			},
+			ClientConfigForServiceFunc: func(serviceName, serviceNamespace string) (*rest.Config, error) {
+				if serviceName == "kubernetes" && serviceNamespace == "default" {
+					return genericConfig.LoopbackClientConfig, nil
+				}
+				ret, err := delegate.ClientConfigForService(serviceName, serviceNamespace)
+				if err != nil {
+					return nil, err
+				}
+				if proxyTransport != nil && proxyTransport.DialContext != nil {
+					ret.Dial = proxyTransport.DialContext
+				}
+				return ret, err
+			},
+		}
+	}
+	if lastErr = s.Audit.ApplyTo(genericConfig, genericWebhookAuthResolverWrapper, versionedInformers); lastErr != nil {
+		return
+	}
 	pluginInitializers, admissionPostStartHook, err = BuildAdmissionPluginInitializers(
 		s,
 		client,
 		sharedInformers,
 		serviceResolver,
-		webhookAuthResolverWrapper,
+		admissionWebhookAuthResolverWrapper,
 	)
 	if err != nil {
 		lastErr = fmt.Errorf("failed to create admission plugin initializer: %v", err)
 		return
 	}
-
 	err = s.Admission.ApplyTo(
 		genericConfig,
 		versionedInformers,
@@ -593,7 +616,7 @@ func BuildAdmissionPluginInitializers(
 	client internalclientset.Interface,
 	sharedInformers informers.SharedInformerFactory,
 	serviceResolver aggregatorapiserver.ServiceResolver,
-	webhookAuthWrapper webhookconfig.AuthenticationInfoResolverWrapper,
+	webhookAuthWrapper admissionwebhookconfig.AuthenticationInfoResolverWrapper,
 ) ([]admission.PluginInitializer, genericapiserver.PostStartHookFunc, error) {
 	var cloudConfig []byte
 

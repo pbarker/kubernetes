@@ -31,6 +31,15 @@ import (
 // PluginName is the name reported in error metrics.
 const PluginName = "buffered"
 
+const (
+	// Default configuration values for ModeBatch.
+	defaultBatchBufferSize    = 10000            // Buffer up to 10000 events before starting discarding.
+	defaultBatchMaxSize       = 400              // Only send up to 400 events at a time.
+	defaultBatchMaxWait       = 30 * time.Second // Send events at least twice a minute.
+	defaultBatchThrottleQPS   = 10               // Limit the send rate by 10 QPS.
+	defaultBatchThrottleBurst = 15               // Allow up to 15 QPS burst.
+)
+
 // BatchConfig represents batching delegate audit backend configuration.
 type BatchConfig struct {
 	// BufferSize defines a size of the buffering queue.
@@ -50,6 +59,18 @@ type BatchConfig struct {
 
 	// Whether the delegate backend should be called asynchronously.
 	AsyncDelegate bool
+}
+
+// NewDefaultBatchConfig returns new Config objects populated by default values.
+func NewDefaultBatchConfig() BatchConfig {
+	return BatchConfig{
+		BufferSize:     defaultBatchBufferSize,
+		MaxBatchSize:   defaultBatchMaxSize,
+		MaxBatchWait:   defaultBatchMaxWait,
+		ThrottleEnable: true,
+		ThrottleQPS:    defaultBatchThrottleQPS,
+		ThrottleBurst:  defaultBatchThrottleBurst,
+	}
 }
 
 type bufferedBackend struct {

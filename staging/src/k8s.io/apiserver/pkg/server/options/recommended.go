@@ -23,6 +23,7 @@ import (
 	"k8s.io/apiserver/pkg/admission"
 	"k8s.io/apiserver/pkg/server"
 	"k8s.io/apiserver/pkg/storage/storagebackend"
+	webhookconfig "k8s.io/apiserver/pkg/util/webhook/config"
 )
 
 // RecommendedOptions contains the recommended options for running an API server.
@@ -92,7 +93,7 @@ func (o *RecommendedOptions) ApplyTo(config *server.RecommendedConfig, scheme *r
 	if err := o.Authorization.ApplyTo(&config.Config.Authorization); err != nil {
 		return err
 	}
-	if err := o.Audit.ApplyTo(&config.Config); err != nil {
+	if err := o.Audit.ApplyTo(&config.Config, webhookconfig.DefaultDynamicResolveWrapper, config.SharedInformerFactory); err != nil {
 		return err
 	}
 	if err := o.Features.ApplyTo(&config.Config); err != nil {

@@ -118,6 +118,10 @@ type Config struct {
 	LegacyAuditWriter io.Writer
 	// AuditBackend is where audit events are sent to.
 	AuditBackend audit.Backend
+	// AuditEnforcedBackend is where audit events are sent to with dynamic auditing
+	AuditEnforcedBackend audit.EnforcedBackend
+	// AuditDynamicConfiguration tells whether dynamic configuration is enabled
+	AuditDynamicConfiguration bool
 	// AuditPolicyChecker makes the decision of whether and how to audit log a request.
 	AuditPolicyChecker auditpolicy.Checker
 	// ExternalAddress is the host name to use for external (public internet) facing URLs (e.g. Swagger)
@@ -452,6 +456,7 @@ func (c completedConfig) New(name string, delegationTarget DelegationTarget) (*G
 		admissionControl:       c.AdmissionControl,
 		Serializer:             c.Serializer,
 		AuditBackend:           c.AuditBackend,
+		AuditEnforcedBackend:   c.AuditEnforcedBackend,
 		Authorizer:             c.Authorization.Authorizer,
 		delegationTarget:       delegationTarget,
 		HandlerChainWaitGroup:  c.HandlerChainWaitGroup,
@@ -534,13 +539,17 @@ func DefaultBuildHandlerChain(apiHandler http.Handler, c *Config) http.Handler {
 	handler := genericapifilters.WithAuthorization(apiHandler, c.Authorization.Authorizer, c.Serializer)
 	handler = genericfilters.WithMaxInFlightLimit(handler, c.MaxRequestsInFlight, c.MaxMutatingRequestsInFlight, c.LongRunningFunc)
 	handler = genericapifilters.WithImpersonation(handler, c.Authorization.Authorizer, c.Serializer)
-	if utilfeature.DefaultFeatureGate.Enabled(features.AdvancedAuditing) {
+	if utilfeature.DefaultFeatureGate.Enabled(features.DynamicAuditing) && c.AuditDynamicConfiguration {
+		handler = genericapifilters.WithDynamicAudit(handler, c.AuditEnforcedBackend, c.LongRunningFunc)
+	} else if utilfeature.DefaultFeatureGate.Enabled(features.AdvancedAuditing) {
 		handler = genericapifilters.WithAudit(handler, c.AuditBackend, c.AuditPolicyChecker, c.LongRunningFunc)
 	} else {
 		handler = genericapifilters.WithLegacyAudit(handler, c.LegacyAuditWriter)
 	}
 	failedHandler := genericapifilters.Unauthorized(c.Serializer, c.Authentication.SupportsBasicAuth)
-	if utilfeature.DefaultFeatureGate.Enabled(features.AdvancedAuditing) {
+	if utilfeature.DefaultFeatureGate.Enabled(features.DynamicAuditing) && c.AuditDynamicConfiguration {
+		failedHandler = genericapifilters.WithFailedAuthenticationDynamicAudit(failedHandler, c.AuditEnforcedBackend)
+	} else if utilfeature.DefaultFeatureGate.Enabled(features.AdvancedAuditing) {
 		failedHandler = genericapifilters.WithFailedAuthenticationAudit(failedHandler, c.AuditBackend, c.AuditPolicyChecker)
 	}
 	handler = genericapifilters.WithAuthentication(handler, c.Authentication.Authenticator, failedHandler)

@@ -49,6 +49,9 @@ filegroup(
 
 filegroup(
     name = "all-srcs",
-    srcs = [":package-srcs"],
+    srcs = [
+        ":package-srcs",
+        "//staging/src/k8s.io/apiserver/pkg/util/webhook/config:all-srcs",
+    ],
     tags = ["automanaged"],
 )
