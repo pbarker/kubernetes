@@ -57,6 +57,38 @@ func WithFailedAuthenticationAudit(failedHandler http.Handler, sink audit.Sink, 
 	})
 }
 
+// WithFailedAuthenticationDynamicAudit decorates a failed http.Handler used in WithAuthentication handler.
+// It is meant to log only failed authentication requests.
+func WithFailedAuthenticationDynamicAudit(failedHandler http.Handler, sink audit.EnforcedSink) http.Handler {
+	if sink == nil {
+		return failedHandler
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		ctx := req.Context()
+		attribs, err := GetAuthorizerAttributes(ctx)
+		if err != nil {
+			utilruntime.HandleError(fmt.Errorf("failed to GetAuthorizerAttributes: %v", err))
+			responsewriters.InternalError(w, req, errors.New("failed to get authorizer attributes"))
+			return
+		}
+		ev, err := audit.NewEventFromRequest(req, auditinternal.LevelRequestResponse, attribs)
+		if err != nil {
+			utilruntime.HandleError(fmt.Errorf("failed to complete audit event from request: %v", err))
+			responsewriters.InternalError(w, req, errors.New("failed to create event from request"))
+			return
+		}
+		if ev == nil {
+			failedHandler.ServeHTTP(w, req)
+			return
+		}
+		ev.ResponseStatus = &metav1.Status{}
+		ev.ResponseStatus.Message = getAuthMethods(req)
+		ev.Stage = auditinternal.StageResponseStarted
+		rw := decorateDynamicResponseWriter(w, ev, attribs, sink)
+		failedHandler.ServeHTTP(rw, req)
+	})
+}
+
 func getAuthMethods(req *http.Request) string {
 	authMethods := []string{}
 

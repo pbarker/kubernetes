@@ -92,7 +92,7 @@ func (o *RecommendedOptions) ApplyTo(config *server.RecommendedConfig, scheme *r
 	if err := o.Authorization.ApplyTo(&config.Config.Authorization); err != nil {
 		return err
 	}
-	if err := o.Audit.ApplyTo(&config.Config); err != nil {
+	if err := o.Audit.ApplyTo(&config.Config, config.WebhookAuthResolverWrapper, config.SharedInformerFactory); err != nil {
 		return err
 	}
 	if err := o.Features.ApplyTo(&config.Config); err != nil {

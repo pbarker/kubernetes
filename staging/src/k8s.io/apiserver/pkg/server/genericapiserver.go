@@ -139,6 +139,9 @@ type GenericAPIServer struct {
 	// auditing. The backend is started after the server starts listening.
 	AuditBackend audit.Backend
 
+	// AuditEnforcedBackend if dyanmic auditing is enabled. The backend is started after the server starts listening.
+	AuditEnforcedBackend audit.EnforcedBackend
+
 	// Authorizer determines whether a user is allowed to make a certain request. The Handler does a preliminary
 	// authorization check using the request URI but it may be necessary to make additional checks, such as in
 	// the create-on-update case
@@ -249,6 +252,13 @@ func (s *GenericAPIServer) PrepareRun() preparedGenericAPIServer {
 			return nil
 		})
 	}
+	// Register audit enforced backend preShutdownHook.
+	if s.AuditEnforcedBackend != nil {
+		s.AddPreShutdownHook("audit-enforced-backend", func() error {
+			s.AuditEnforcedBackend.Shutdown()
+			return nil
+		})
+	}
 
 	return preparedGenericAPIServer{s}
 }
@@ -286,6 +296,12 @@ func (s preparedGenericAPIServer) NonBlockingRun(stopCh <-chan struct{}) error {
 	if s.AuditBackend != nil {
 		if err := s.AuditBackend.Run(auditStopCh); err != nil {
 			return fmt.Errorf("failed to run the audit backend: %v", err)
+		}
+	}
+
+	if s.AuditEnforcedBackend != nil {
+		if err := s.AuditEnforcedBackend.Run(auditStopCh); err != nil {
+			return fmt.Errorf("failed to run the audit enforced backend: %v", err)
 		}
 	}
 

@@ -18,6 +18,7 @@ package filters
 
 import (
 	"bufio"
+	"fmt"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -32,14 +33,18 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/wait"
 	auditinternal "k8s.io/apiserver/pkg/apis/audit"
+	"k8s.io/apiserver/pkg/audit"
 	"k8s.io/apiserver/pkg/audit/policy"
 	"k8s.io/apiserver/pkg/authentication/user"
+	"k8s.io/apiserver/pkg/authorization/authorizer"
 	"k8s.io/apiserver/pkg/endpoints/request"
+	enforcedplugin "k8s.io/apiserver/plugin/pkg/audit/enforced"
 )
 
 type fakeAuditSink struct {
 	lock   sync.Mutex
 	events []*auditinternal.Event
+	policy policy.DynamicPolicy
 }
 
 func (s *fakeAuditSink) ProcessEvents(evs ...*auditinternal.Event) {
@@ -51,11 +56,32 @@ func (s *fakeAuditSink) ProcessEvents(evs ...*auditinternal.Event) {
 	}
 }
 
+func (s *fakeAuditSink) ProcessEnforcedEvents(evs ...*audit.EnforcedEvent) {
+	s.lock.Lock()
+	defer s.lock.Unlock()
+	for _, e := range evs {
+		event := e.Event.DeepCopy()
+		audit.ObservePolicyLevel(s.policy.Level)
+		if s.policy.Level == auditinternal.LevelNone {
+			continue
+		}
+		event = policy.EnforceDynamicPolicy(event, s.policy.Level, s.policy.Stages)
+		if event == nil {
+			continue
+		}
+		s.events = append(s.events, event)
+	}
+}
+
 func (s *fakeAuditSink) Events() []*auditinternal.Event {
 	s.lock.Lock()
 	defer s.lock.Unlock()
 	return append([]*auditinternal.Event{}, s.events...)
 }
+
+func (s *fakeAuditSink) Run(stopCh <-chan struct{}) error { return nil }
+func (s *fakeAuditSink) Shutdown()                        {}
+func (s *fakeAuditSink) String() string                   { return "fake" }
 
 func (s *fakeAuditSink) Pop(timeout time.Duration) (*auditinternal.Event, error) {
 	var result *auditinternal.Event
@@ -107,30 +133,59 @@ func TestConstructResponseWriter(t *testing.T) {
 }
 
 func TestDecorateResponseWriterWithoutChannel(t *testing.T) {
-	ev := &auditinternal.Event{}
-	actual := decorateResponseWriter(&simpleResponseWriter{}, ev, nil, nil)
+	legacyEV := &auditinternal.Event{}
+	dynamicEV := &auditinternal.Event{}
 
-	// write status. This will not block because firstEventSentCh is nil
-	actual.WriteHeader(42)
-	if ev.ResponseStatus == nil {
-		t.Fatalf("Expected ResponseStatus to be non-nil")
+	testRWs := map[string]testResponseWriter{
+		"legacy": {
+			rw: decorateResponseWriter(&simpleResponseWriter{}, legacyEV, nil, nil),
+			ev: legacyEV,
+		},
+		"dynamic": {
+			rw: decorateDynamicResponseWriter(&simpleDynamicResponseWriter{}, dynamicEV, nil, nil),
+			ev: dynamicEV,
+		},
 	}
-	if ev.ResponseStatus.Code != 42 {
-		t.Errorf("expected status code 42, got %d", ev.ResponseStatus.Code)
+
+	for name, testRW := range testRWs {
+		t.Run(name, func(t *testing.T) {
+			// write status. This will not block because firstEventSentCh is nil
+			testRW.rw.WriteHeader(42)
+			if testRW.ev.ResponseStatus == nil {
+				t.Fatalf("Expected ResponseStatus to be non-nil")
+			}
+			if testRW.ev.ResponseStatus.Code != 42 {
+				t.Errorf("expected status code 42, got %d", testRW.ev.ResponseStatus.Code)
+			}
+		})
 	}
 }
 
 func TestDecorateResponseWriterWithImplicitWrite(t *testing.T) {
-	ev := &auditinternal.Event{}
-	actual := decorateResponseWriter(&simpleResponseWriter{}, ev, nil, nil)
+	legacyEV := &auditinternal.Event{}
+	dynamicEV := &auditinternal.Event{}
 
-	// write status. This will not block because firstEventSentCh is nil
-	actual.Write([]byte("foo"))
-	if ev.ResponseStatus == nil {
-		t.Fatalf("Expected ResponseStatus to be non-nil")
+	testRWs := map[string]testResponseWriter{
+		"legacy": {
+			rw: decorateResponseWriter(&simpleResponseWriter{}, legacyEV, nil, nil),
+			ev: legacyEV,
+		},
+		"dynamic": {
+			rw: decorateDynamicResponseWriter(&simpleDynamicResponseWriter{}, dynamicEV, authorizer.AttributesRecord{}, nil),
+			ev: dynamicEV,
+		},
 	}
-	if ev.ResponseStatus.Code != 200 {
-		t.Errorf("expected status code 200, got %d", ev.ResponseStatus.Code)
+	for name, testRW := range testRWs {
+		t.Run(name, func(t *testing.T) {
+			// write status. This will not block because firstEventSentCh is nil
+			testRW.rw.Write([]byte("foo"))
+			if testRW.ev.ResponseStatus == nil {
+				t.Fatalf("Expected ResponseStatus to be non-nil")
+			}
+			if testRW.ev.ResponseStatus.Code != 200 {
+				t.Errorf("expected status code 200, got %d", testRW.ev.ResponseStatus.Code)
+			}
+		})
 	}
 }
 
@@ -664,101 +719,119 @@ func TestAudit(t *testing.T) {
 			true,
 		},
 	} {
-		t.Run(test.desc, func(t *testing.T) {
-			sink := &fakeAuditSink{}
-			policyChecker := policy.FakeChecker(auditinternal.LevelRequestResponse, test.omitStages)
-			handler := WithAudit(http.HandlerFunc(test.handler), sink, policyChecker, func(r *http.Request, ri *request.RequestInfo) bool {
+		handlers := buildTestHandlers(
+			auditinternal.LevelRequestResponse,
+			test.omitStages,
+			test.handler,
+			func(r *http.Request, ri *request.RequestInfo) bool {
 				// simplified long-running check
 				return ri.Verb == "watch"
-			})
+			},
+		)
+		for name, testHandler := range handlers {
+			t.Run(fmt.Sprintf("%s/%s", name, test.desc), func(t *testing.T) {
+				req, _ := http.NewRequest(test.verb, test.path, nil)
+				req = withTestContext(req, &user.DefaultInfo{Name: "admin"}, nil)
+				if test.auditID != "" {
+					req.Header.Add("Audit-ID", test.auditID)
+				}
+				req.RemoteAddr = "127.0.0.1"
 
-			req, _ := http.NewRequest(test.verb, test.path, nil)
-			req = withTestContext(req, &user.DefaultInfo{Name: "admin"}, nil)
-			if test.auditID != "" {
-				req.Header.Add("Audit-ID", test.auditID)
-			}
-			req.RemoteAddr = "127.0.0.1"
-
-			func() {
-				defer func() {
-					recover()
+				func() {
+					defer func() {
+						recover()
+					}()
+					testHandler.handler.ServeHTTP(httptest.NewRecorder(), req)
 				}()
-				handler.ServeHTTP(httptest.NewRecorder(), req)
-			}()
 
-			events := sink.Events()
-			t.Logf("audit log: %v", events)
+				events := testHandler.sink.Events()
+				t.Logf("audit log: %v", events)
 
-			if len(events) != len(test.expected) {
-				t.Fatalf("Unexpected amount of lines in audit log: %d", len(events))
-			}
-			expectedID := types.UID("")
-			for i, expect := range test.expected {
-				event := events[i]
-				if "admin" != event.User.Username {
-					t.Errorf("Unexpected username: %s", event.User.Username)
+				if len(events) != len(test.expected) {
+					t.Fatalf("Unexpected amount of lines in audit log: %d", len(events))
 				}
-				if event.Stage != expect.Stage {
-					t.Errorf("Unexpected Stage: %s", event.Stage)
-				}
-				if event.Verb != expect.Verb {
-					t.Errorf("Unexpected Verb: %s", event.Verb)
-				}
-				if event.RequestURI != expect.RequestURI {
-					t.Errorf("Unexpected RequestURI: %s", event.RequestURI)
-				}
+				expectedID := types.UID("")
+				for i, expect := range test.expected {
+					event := events[i]
+					if "admin" != event.User.Username {
+						t.Errorf("Unexpected username: %s", event.User.Username)
+					}
+					if event.Stage != expect.Stage {
+						t.Errorf("Unexpected Stage: %s", event.Stage)
+					}
+					if event.Verb != expect.Verb {
+						t.Errorf("Unexpected Verb: %s", event.Verb)
+					}
+					if event.RequestURI != expect.RequestURI {
+						t.Errorf("Unexpected RequestURI: %s", event.RequestURI)
+					}
 
-				if test.auditID != "" && event.AuditID != types.UID(test.auditID) {
-					t.Errorf("Unexpected AuditID in audit event, AuditID should be the same with Audit-ID http header")
+					if test.auditID != "" && event.AuditID != types.UID(test.auditID) {
+						t.Errorf("Unexpected AuditID in audit event, AuditID should be the same with Audit-ID http header")
+					}
+					if expectedID == types.UID("") {
+						expectedID = event.AuditID
+					} else if expectedID != event.AuditID {
+						t.Errorf("Audits for one request should share the same AuditID, %s differs from %s", expectedID, event.AuditID)
+					}
+					if event.ObjectRef.APIVersion != "v1" {
+						t.Errorf("Unexpected apiVersion: %s", event.ObjectRef.APIVersion)
+					}
+					if event.ObjectRef.APIGroup != "" {
+						t.Errorf("Unexpected apiGroup: %s", event.ObjectRef.APIGroup)
+					}
+					if (event.ResponseStatus == nil) != (expect.ResponseStatus == nil) {
+						t.Errorf("Unexpected ResponseStatus: %v", event.ResponseStatus)
+						continue
+					}
+					if (event.ResponseStatus != nil) && (event.ResponseStatus.Code != expect.ResponseStatus.Code) {
+						t.Errorf("Unexpected status code : %d", event.ResponseStatus.Code)
+					}
 				}
-				if expectedID == types.UID("") {
-					expectedID = event.AuditID
-				} else if expectedID != event.AuditID {
-					t.Errorf("Audits for one request should share the same AuditID, %s differs from %s", expectedID, event.AuditID)
-				}
-				if event.ObjectRef.APIVersion != "v1" {
-					t.Errorf("Unexpected apiVersion: %s", event.ObjectRef.APIVersion)
-				}
-				if event.ObjectRef.APIGroup != "" {
-					t.Errorf("Unexpected apiGroup: %s", event.ObjectRef.APIGroup)
-				}
-				if (event.ResponseStatus == nil) != (expect.ResponseStatus == nil) {
-					t.Errorf("Unexpected ResponseStatus: %v", event.ResponseStatus)
-					continue
-				}
-				if (event.ResponseStatus != nil) && (event.ResponseStatus.Code != expect.ResponseStatus.Code) {
-					t.Errorf("Unexpected status code : %d", event.ResponseStatus.Code)
-				}
-			}
-		})
+			})
+		}
 	}
 }
 
 func TestAuditNoPanicOnNilUser(t *testing.T) {
-	policyChecker := policy.FakeChecker(auditinternal.LevelRequestResponse, nil)
-	handler := WithAudit(&fakeHTTPHandler{}, &fakeAuditSink{}, policyChecker, nil)
-	req, _ := http.NewRequest("GET", "/api/v1/namespaces/default/pods", nil)
-	req = withTestContext(req, nil, nil)
-	req.RemoteAddr = "127.0.0.1"
-	handler.ServeHTTP(httptest.NewRecorder(), req)
+	handlers := buildTestHandlers(
+		auditinternal.LevelRequestResponse,
+		[]auditinternal.Stage{},
+		http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(200)
+		}),
+		nil,
+	)
+	for name, testHandler := range handlers {
+		t.Run(name, func(t *testing.T) {
+			req, _ := http.NewRequest("GET", "/api/v1/namespaces/default/pods", nil)
+			req = withTestContext(req, nil, nil)
+			req.RemoteAddr = "127.0.0.1"
+			testHandler.handler.ServeHTTP(httptest.NewRecorder(), req)
+		})
+	}
 }
 
 func TestAuditLevelNone(t *testing.T) {
-	sink := &fakeAuditSink{}
-	var handler http.Handler
-	handler = http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(200)
-	})
-	policyChecker := policy.FakeChecker(auditinternal.LevelNone, nil)
-	handler = WithAudit(handler, sink, policyChecker, nil)
+	handlers := buildTestHandlers(
+		auditinternal.LevelNone,
+		[]auditinternal.Stage{},
+		http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(200)
+		}),
+		nil,
+	)
+	for name, testHandler := range handlers {
+		t.Run(name, func(t *testing.T) {
+			req, _ := http.NewRequest("GET", "/api/v1/namespaces/default/pods", nil)
+			req.RemoteAddr = "127.0.0.1"
+			req = withTestContext(req, &user.DefaultInfo{Name: "admin"}, nil)
 
-	req, _ := http.NewRequest("GET", "/api/v1/namespaces/default/pods", nil)
-	req.RemoteAddr = "127.0.0.1"
-	req = withTestContext(req, &user.DefaultInfo{Name: "admin"}, nil)
-
-	handler.ServeHTTP(httptest.NewRecorder(), req)
-	if len(sink.events) > 0 {
-		t.Errorf("Generated events, but should not have: %#v", sink.events)
+			testHandler.handler.ServeHTTP(httptest.NewRecorder(), req)
+			if len(testHandler.sink.events) > 0 {
+				t.Errorf("Generated events, but should not have: %#v", testHandler.sink.events)
+			}
+		})
 	}
 }
 
@@ -841,4 +914,47 @@ func withTestContext(req *http.Request, user user.Info, audit *auditinternal.Eve
 		ctx = request.WithRequestInfo(ctx, info)
 	}
 	return req.WithContext(ctx)
+}
+
+type testHandler struct {
+	handler http.Handler
+	sink    *fakeAuditSink
+}
+
+type testResponseWriter struct {
+	rw   http.ResponseWriter
+	sink *fakeAuditSink
+	ev   *auditinternal.Event
+}
+
+// buildTestHandlers builds the different audit handlers (dynamic, legacy) from a set
+// of common parameters
+func buildTestHandlers(
+	level auditinternal.Level,
+	omitStages []auditinternal.Stage,
+	handlerFunc http.HandlerFunc,
+	longRunningCheck request.LongRunningRequestCheck,
+) map[string]testHandler {
+	handlers := map[string]testHandler{}
+	dynamicPolicy := policy.DynamicPolicy{
+		Level:  level,
+		Stages: policy.InvertOmitStages(omitStages),
+	}
+	dynamicSink := &fakeAuditSink{}
+	enforcedBackend := enforcedplugin.NewBackend(dynamicSink, &dynamicPolicy)
+	dynamicHandler := WithDynamicAudit(handlerFunc, enforcedBackend, longRunningCheck)
+	handlers["dynamic"] = testHandler{
+		handler: dynamicHandler,
+		sink:    dynamicSink,
+	}
+
+	legacySink := &fakeAuditSink{}
+	policyChecker := policy.FakeChecker(level, omitStages)
+	legacyHandler := WithAudit(handlerFunc, legacySink, policyChecker, longRunningCheck)
+	handlers["legacy"] = testHandler{
+		handler: legacyHandler,
+		sink:    legacySink,
+	}
+
+	return handlers
 }

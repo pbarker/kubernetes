@@ -448,9 +448,6 @@ func buildGenericConfig(
 	if lastErr = s.Authentication.ApplyTo(genericConfig); lastErr != nil {
 		return
 	}
-	if lastErr = s.Audit.ApplyTo(genericConfig); lastErr != nil {
-		return
-	}
 	if lastErr = s.Features.ApplyTo(genericConfig); lastErr != nil {
 		return
 	}
@@ -539,7 +536,7 @@ func buildGenericConfig(
 		genericConfig.DisabledPostStartHooks.Insert(rbacrest.PostStartHookName)
 	}
 
-	webhookAuthResolverWrapper := func(delegate webhook.AuthenticationInfoResolver) webhook.AuthenticationInfoResolver {
+	genericConfig.WebhookAuthResolverWrapper = func(delegate webhook.AuthenticationInfoResolver) webhook.AuthenticationInfoResolver {
 		return &webhook.AuthenticationInfoResolverDelegator{
 			ClientConfigForFunc: func(server string) (*rest.Config, error) {
 				if server == "kubernetes.default.svc" {
@@ -562,18 +559,20 @@ func buildGenericConfig(
 			},
 		}
 	}
+	if lastErr = s.Audit.ApplyTo(genericConfig, genericConfig.WebhookAuthResolverWrapper, versionedInformers); lastErr != nil {
+		return
+	}
 	pluginInitializers, admissionPostStartHook, err = BuildAdmissionPluginInitializers(
 		s,
 		client,
 		sharedInformers,
 		serviceResolver,
-		webhookAuthResolverWrapper,
+		genericConfig.WebhookAuthResolverWrapper,
 	)
 	if err != nil {
 		lastErr = fmt.Errorf("failed to create admission plugin initializer: %v", err)
 		return
 	}
-
 	err = s.Admission.ApplyTo(
 		genericConfig,
 		versionedInformers,

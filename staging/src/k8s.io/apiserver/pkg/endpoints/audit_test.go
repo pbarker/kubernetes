@@ -29,7 +29,9 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/apiserver/pkg/admission"
 	auditinternal "k8s.io/apiserver/pkg/apis/audit"
+	"k8s.io/apiserver/pkg/audit"
 	genericapitesting "k8s.io/apiserver/pkg/endpoints/testing"
 	"k8s.io/apiserver/pkg/registry/rest"
 )
@@ -50,6 +52,18 @@ func (s *fakeAuditSink) Events() []*auditinternal.Event {
 	defer s.lock.Unlock()
 	return append([]*auditinternal.Event{}, s.events...)
 }
+
+func (s *fakeAuditSink) ProcessEnforcedEvents(evs ...*audit.EnforcedEvent) {
+	s.lock.Lock()
+	defer s.lock.Unlock()
+	for _, ee := range evs {
+		s.events = append(s.events, ee.Event)
+	}
+}
+
+func (s *fakeAuditSink) Run(stopCh <-chan struct{}) error { return nil }
+func (s *fakeAuditSink) Shutdown()                        {}
+func (s *fakeAuditSink) String() string                   { return "fake" }
 
 func TestAudit(t *testing.T) {
 	type eventCheck func(events []*auditinternal.Event) error
@@ -277,8 +291,7 @@ func TestAudit(t *testing.T) {
 			},
 		},
 	} {
-		sink := &fakeAuditSink{}
-		handler := handleInternal(map[string]rest.Storage{
+		handlers := buildInternalTestHandlers(map[string]rest.Storage{
 			"simple": &SimpleRESTStorage{
 				list: []genericapitesting.Simple{
 					{
@@ -295,63 +308,98 @@ func TestAudit(t *testing.T) {
 					Other:      "foo",
 				},
 			},
-		}, admissionControl, selfLinker, sink)
+		}, admissionControl, selfLinker)
 
-		server := httptest.NewServer(handler)
-		defer server.Close()
-		client := http.Client{Timeout: 2 * time.Second}
+		for name, testHandler := range handlers {
+			t.Run(fmt.Sprintf("%s/%s", name, test.desc), func(t *testing.T) {
+				server := httptest.NewServer(testHandler.handler)
+				defer server.Close()
+				client := http.Client{Timeout: 2 * time.Second}
 
-		req, err := test.req(server.URL)
-		if err != nil {
-			t.Errorf("[%s] error creating the request: %v", test.desc, err)
-		}
-
-		req.Header.Set("User-Agent", userAgent)
-
-		response, err := client.Do(req)
-		if err != nil {
-			t.Errorf("[%s] error: %v", test.desc, err)
-		}
-
-		if response.StatusCode != test.code {
-			t.Errorf("[%s] expected http code %d, got %#v", test.desc, test.code, response)
-		}
-
-		// close body because the handler might block in Flush, unable to send the remaining event.
-		response.Body.Close()
-
-		// wait for events to arrive, at least the given number in the test
-		events := []*auditinternal.Event{}
-		err = wait.Poll(50*time.Millisecond, wait.ForeverTestTimeout, wait.ConditionFunc(func() (done bool, err error) {
-			events = sink.Events()
-			return len(events) >= test.events, nil
-		}))
-		if err != nil {
-			t.Errorf("[%s] timeout waiting for events", test.desc)
-		}
-
-		if got := len(events); got != test.events {
-			t.Errorf("[%s] expected %d audit events, got %d", test.desc, test.events, got)
-		} else {
-			for i, check := range test.checks {
-				err := check(events)
+				req, err := test.req(server.URL)
 				if err != nil {
-					t.Errorf("[%s,%d] %v", test.desc, i, err)
+					t.Errorf("[%s] error creating the request: %v", test.desc, err)
 				}
-			}
 
-			if err := requestUserAgentMatches(userAgent)(events); err != nil {
-				t.Errorf("[%s] %v", test.desc, err)
-			}
-		}
+				req.Header.Set("User-Agent", userAgent)
 
-		if len(events) > 0 {
-			status := events[len(events)-1].ResponseStatus
-			if status == nil {
-				t.Errorf("[%s] expected non-nil ResponseStatus in last event", test.desc)
-			} else if int(status.Code) != test.code {
-				t.Errorf("[%s] expected ResponseStatus.Code=%d, got %d", test.desc, test.code, status.Code)
-			}
+				response, err := client.Do(req)
+				if err != nil {
+					t.Errorf("[%s] error: %v", test.desc, err)
+				}
+
+				if response.StatusCode != test.code {
+					t.Errorf("[%s] expected http code %d, got %#v", test.desc, test.code, response)
+				}
+
+				// close body because the handler might block in Flush, unable to send the remaining event.
+				response.Body.Close()
+
+				// wait for events to arrive, at least the given number in the test
+				events := []*auditinternal.Event{}
+				err = wait.Poll(50*time.Millisecond, wait.ForeverTestTimeout, wait.ConditionFunc(func() (done bool, err error) {
+					events = testHandler.sink.Events()
+					return len(events) >= test.events, nil
+				}))
+				if err != nil {
+					t.Errorf("[%s] timeout waiting for events", test.desc)
+				}
+
+				if got := len(events); got != test.events {
+					t.Errorf("[%s] expected %d audit events, got %d", test.desc, test.events, got)
+				} else {
+					for i, check := range test.checks {
+						err := check(events)
+						if err != nil {
+							t.Errorf("[%s,%d] %v", test.desc, i, err)
+						}
+					}
+
+					if err := requestUserAgentMatches(userAgent)(events); err != nil {
+						t.Errorf("[%s] %v", test.desc, err)
+					}
+				}
+
+				if len(events) > 0 {
+					status := events[len(events)-1].ResponseStatus
+					if status == nil {
+						t.Errorf("[%s] expected non-nil ResponseStatus in last event", test.desc)
+					} else if int(status.Code) != test.code {
+						t.Errorf("[%s] expected ResponseStatus.Code=%d, got %d", test.desc, test.code, status.Code)
+					}
+				}
+			})
 		}
 	}
+}
+
+type testHandler struct {
+	handler http.Handler
+	sink    *fakeAuditSink
+}
+
+// buildInternalTestHandlers builds the different audit handlers (dynamic, legacy) from a set
+// of common parameters
+func buildInternalTestHandlers(
+	storage map[string]rest.Storage,
+	admissionControl admission.Interface,
+	selfLinker runtime.SelfLinker,
+) map[string]testHandler {
+	handlers := map[string]testHandler{}
+
+	dynamicSink := &fakeAuditSink{}
+	dynamicHandler := handleInternalDynamic(storage, admissionControl, selfLinker, dynamicSink)
+	handlers["dynamic"] = testHandler{
+		handler: dynamicHandler,
+		sink:    dynamicSink,
+	}
+
+	legacySink := &fakeAuditSink{}
+	legacyHandler := handleInternal(storage, admissionControl, selfLinker, legacySink)
+	handlers["legacy"] = testHandler{
+		handler: legacyHandler,
+		sink:    legacySink,
+	}
+
+	return handlers
 }

@@ -61,6 +61,14 @@ type backend struct {
 
 var _ audit.Backend = &backend{}
 
+// NewDefaultTruncateOptions provides reasonable defaults for the trucate backend
+func NewDefaultTruncateOptions() Config {
+	return Config{
+		MaxBatchSize: 10 * 1024 * 1024, // 10MB
+		MaxEventSize: 100 * 1024,       // 100KB
+	}
+}
+
 // NewBackend returns a new truncating backend, using configuration passed in the parameters.
 // Truncate backend automatically runs and shut downs the delegate backend.
 func NewBackend(delegateBackend audit.Backend, config Config, groupVersion schema.GroupVersion) audit.Backend {

@@ -60,6 +60,7 @@ import (
 	serverstore "k8s.io/apiserver/pkg/server/storage"
 	utilfeature "k8s.io/apiserver/pkg/util/feature"
 	"k8s.io/apiserver/pkg/util/logs"
+	"k8s.io/apiserver/pkg/util/webhook"
 	"k8s.io/client-go/informers"
 	restclient "k8s.io/client-go/rest"
 	certutil "k8s.io/client-go/util/cert"
@@ -89,6 +90,10 @@ type Config struct {
 	// Authorization is the configuration for authorization
 	Authorization AuthorizationInfo
 
+	// WebhookAuthResolverWrapper provides the base authentication info wrapper
+	// for all outgoing webhooks
+	WebhookAuthResolverWrapper webhook.AuthenticationInfoResolverWrapper
+
 	// LoopbackClientConfig is a config for a privileged loopback connection to the API server
 	// This is required for proper functioning of the PostStartHooks on a GenericAPIServer
 	// TODO: move into SecureServing(WithLoopback) as soon as insecure serving is gone
@@ -115,6 +120,10 @@ type Config struct {
 	Version *version.Info
 	// AuditBackend is where audit events are sent to.
 	AuditBackend audit.Backend
+	// AuditEnforcedBackend is where audit events are sent to with dynamic auditing
+	AuditEnforcedBackend audit.EnforcedBackend
+	// AuditDynamicConfiguration tells whether dynamic configuration is enabled
+	AuditDynamicConfiguration bool
 	// AuditPolicyChecker makes the decision of whether and how to audit log a request.
 	AuditPolicyChecker auditpolicy.Checker
 	// ExternalAddress is the host name to use for external (public internet) facing URLs (e.g. Swagger)
@@ -452,6 +461,7 @@ func (c completedConfig) New(name string, delegationTarget DelegationTarget) (*G
 		admissionControl:       c.AdmissionControl,
 		Serializer:             c.Serializer,
 		AuditBackend:           c.AuditBackend,
+		AuditEnforcedBackend:   c.AuditEnforcedBackend,
 		Authorizer:             c.Authorization.Authorizer,
 		delegationTarget:       delegationTarget,
 		HandlerChainWaitGroup:  c.HandlerChainWaitGroup,
@@ -534,9 +544,17 @@ func DefaultBuildHandlerChain(apiHandler http.Handler, c *Config) http.Handler {
 	handler := genericapifilters.WithAuthorization(apiHandler, c.Authorization.Authorizer, c.Serializer)
 	handler = genericfilters.WithMaxInFlightLimit(handler, c.MaxRequestsInFlight, c.MaxMutatingRequestsInFlight, c.LongRunningFunc)
 	handler = genericapifilters.WithImpersonation(handler, c.Authorization.Authorizer, c.Serializer)
-	handler = genericapifilters.WithAudit(handler, c.AuditBackend, c.AuditPolicyChecker, c.LongRunningFunc)
+	if utilfeature.DefaultFeatureGate.Enabled(features.DynamicAuditing) && c.AuditDynamicConfiguration {
+		handler = genericapifilters.WithDynamicAudit(handler, c.AuditEnforcedBackend, c.LongRunningFunc)
+	} else {
+		handler = genericapifilters.WithAudit(handler, c.AuditBackend, c.AuditPolicyChecker, c.LongRunningFunc)
+	}
 	failedHandler := genericapifilters.Unauthorized(c.Serializer, c.Authentication.SupportsBasicAuth)
-	failedHandler = genericapifilters.WithFailedAuthenticationAudit(failedHandler, c.AuditBackend, c.AuditPolicyChecker)
+	if utilfeature.DefaultFeatureGate.Enabled(features.DynamicAuditing) && c.AuditDynamicConfiguration {
+		failedHandler = genericapifilters.WithFailedAuthenticationDynamicAudit(failedHandler, c.AuditEnforcedBackend)
+	} else {
+		failedHandler = genericapifilters.WithFailedAuthenticationAudit(failedHandler, c.AuditBackend, c.AuditPolicyChecker)
+	}
 	handler = genericapifilters.WithAuthentication(handler, c.Authentication.Authenticator, failedHandler, c.Authentication.APIAudiences)
 	handler = genericfilters.WithCORS(handler, c.CorsAllowedOriginList, nil, nil, nil, "true")
 	handler = genericfilters.WithTimeoutForNonLongRunningRequests(handler, c.LongRunningFunc, c.RequestTimeout)

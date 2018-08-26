@@ -33,11 +33,16 @@ import (
 	auditv1beta1 "k8s.io/apiserver/pkg/apis/audit/v1beta1"
 	"k8s.io/apiserver/pkg/audit"
 	"k8s.io/apiserver/pkg/audit/policy"
+	"k8s.io/apiserver/pkg/features"
 	"k8s.io/apiserver/pkg/server"
+	utilfeature "k8s.io/apiserver/pkg/util/feature"
+	webhook "k8s.io/apiserver/pkg/util/webhook"
 	pluginbuffered "k8s.io/apiserver/plugin/pkg/audit/buffered"
+	plugindynamic "k8s.io/apiserver/plugin/pkg/audit/dynamic"
 	pluginlog "k8s.io/apiserver/plugin/pkg/audit/log"
 	plugintruncate "k8s.io/apiserver/plugin/pkg/audit/truncate"
 	pluginwebhook "k8s.io/apiserver/plugin/pkg/audit/webhook"
+	"k8s.io/client-go/informers"
 )
 
 const (
@@ -57,6 +62,10 @@ func appendBackend(existing, newBackend audit.Backend) audit.Backend {
 	return audit.Union(existing, newBackend)
 }
 
+func dynamicAuditingEnabled() bool {
+	return utilfeature.DefaultFeatureGate.Enabled(features.DynamicAuditing)
+}
+
 type AuditOptions struct {
 	// Policy configuration file for filtering audit events that are captured.
 	// If unspecified, a default is provided.
@@ -65,6 +74,7 @@ type AuditOptions struct {
 	// Plugin options
 	LogOptions     AuditLogOptions
 	WebhookOptions AuditWebhookOptions
+	DynamicOptions AuditDynamicOptions
 }
 
 const (
@@ -127,6 +137,11 @@ type AuditWebhookOptions struct {
 
 	// API group version used for serializing audit events.
 	GroupVersionString string
+}
+
+type AuditDynamicOptions struct {
+	// Enabled tells whether the dynamic audit capability is enabled.
+	Enabled bool
 }
 
 func NewAuditOptions() *AuditOptions {
@@ -252,9 +267,14 @@ func (o *AuditOptions) AddFlags(fs *pflag.FlagSet) {
 	o.WebhookOptions.AddFlags(fs)
 	o.WebhookOptions.BatchOptions.AddFlags(pluginwebhook.PluginName, fs)
 	o.WebhookOptions.TruncateOptions.AddFlags(pluginwebhook.PluginName, fs)
+	o.DynamicOptions.AddFlags(fs)
 }
 
-func (o *AuditOptions) ApplyTo(c *server.Config) error {
+func (o *AuditOptions) ApplyTo(
+	c *server.Config,
+	authInfoResolver webhook.AuthenticationInfoResolverWrapper,
+	informers informers.SharedInformerFactory,
+) error {
 	if o == nil {
 		return nil
 	}
@@ -272,8 +292,11 @@ func (o *AuditOptions) ApplyTo(c *server.Config) error {
 	if err := o.WebhookOptions.applyTo(c); err != nil {
 		return err
 	}
-
-	if c.AuditBackend != nil && c.AuditPolicyChecker == nil {
+	// 3. Apply dynamic options.
+	if err := o.DynamicOptions.applyTo(c, o.WebhookOptions, authInfoResolver, informers); err != nil {
+		return err
+	}
+	if c.AuditBackend != nil && c.AuditPolicyChecker == nil && !dynamicAuditingEnabled() {
 		glog.V(2).Info("No audit policy file provided for AdvancedAuditing, no events will be recorded.")
 	}
 	return nil
@@ -498,6 +521,41 @@ func (o *AuditWebhookOptions) applyTo(c *server.Config) error {
 	webhook = o.BatchOptions.wrapBackend(webhook)
 	webhook = o.TruncateOptions.wrapBackend(webhook, groupVersion)
 	c.AuditBackend = appendBackend(c.AuditBackend, webhook)
+	return nil
+}
+
+func (o *AuditDynamicOptions) AddFlags(fs *pflag.FlagSet) {
+	fs.BoolVar(&o.Enabled, "audit-dynamic-configuration", false,
+		"Enables dynamic audit configuration")
+}
+
+func (o *AuditDynamicOptions) enabled() bool {
+	return o.Enabled
+}
+
+func (o *AuditDynamicOptions) applyTo(
+	c *server.Config,
+	a AuditWebhookOptions,
+	authInfoResolver webhook.AuthenticationInfoResolverWrapper,
+	informers informers.SharedInformerFactory,
+) error {
+	if !o.enabled() {
+		return nil
+	}
+	c.AuditDynamicConfiguration = true
+	dc := &plugindynamic.Config{
+		F:                       informers,
+		StaticPolicyChecker:     c.AuditPolicyChecker,
+		StaticBackend:           c.AuditBackend,
+		TruncateConfig:          &a.TruncateOptions.TruncateConfig,
+		BufferedConfig:          &a.BatchOptions.BatchConfig,
+		AuthInfoResolverWrapper: authInfoResolver,
+	}
+	eb, err := plugindynamic.NewEnforcedBackend(dc)
+	if err != nil {
+		return fmt.Errorf("could not create dynamic audit backend: %v", err)
+	}
+	c.AuditEnforcedBackend = eb
 	return nil
 }
 
