@@ -10,6 +10,7 @@ go_test(
     name = "go_default_test",
     srcs = [
         "apiserver_test.go",
+        "audit_dynamic_test.go",
         "audit_test.go",
         "installer_test.go",
         "patchhandler_test.go",
@@ -51,6 +52,7 @@ go_test(
         "//staging/src/k8s.io/apiserver/pkg/endpoints/testing:go_default_library",
         "//staging/src/k8s.io/apiserver/pkg/registry/rest:go_default_library",
         "//staging/src/k8s.io/apiserver/pkg/server/filters:go_default_library",
+        "//staging/src/k8s.io/apiserver/plugin/pkg/audit/enforced:go_default_library",
         "//vendor/github.com/emicklei/go-restful:go_default_library",
         "//vendor/golang.org/x/net/websocket:go_default_library",
     ],

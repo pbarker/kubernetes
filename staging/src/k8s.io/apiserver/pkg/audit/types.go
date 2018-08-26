@@ -18,6 +18,7 @@ package audit
 
 import (
 	auditinternal "k8s.io/apiserver/pkg/apis/audit"
+	"k8s.io/apiserver/pkg/authorization/authorizer"
 )
 
 type Sink interface {
@@ -42,4 +43,31 @@ type Backend interface {
 
 	// Returns the backend PluginName.
 	String() string
+}
+
+// EnforcedEvent holds an audit event and the authorizer attributes of the caller
+// this is used to enforce policy per dynamic backend
+type EnforcedEvent struct {
+	Event      *auditinternal.Event
+	Attributes authorizer.Attributes
+}
+
+// EnforcedSink processes enforced events
+type EnforcedSink interface {
+	// ProcessEnforcedEvents is handles enforcing policy and processing the given events
+	ProcessEnforcedEvents(events ...*EnforcedEvent)
+}
+
+// EnforcedBackend processes enforced events
+type EnforcedBackend interface {
+	EnforcedSink
+
+	// Run will initialize the backend. It must not block, but may run go routines in the background. If
+	// stopCh is closed, it is supposed to stop them. Run will be called before the first call to ProcessEvents.
+	Run(stopCh <-chan struct{}) error
+
+	// Shutdown will synchronously shut down the backend while making sure that all pending
+	// events are delivered. It can be assumed that this method is called after
+	// the stopCh channel passed to the Run method has been closed.
+	Shutdown()
 }

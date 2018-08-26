@@ -51,6 +51,9 @@ func (s *fakeAuditSink) Events() []*auditinternal.Event {
 	return append([]*auditinternal.Event{}, s.events...)
 }
 
+func (s *fakeAuditSink) Run(stopCh <-chan struct{}) error { return nil }
+func (s *fakeAuditSink) Shutdown()                        {}
+func (s *fakeAuditSink) String() string                   { return "fake" }
 func TestAudit(t *testing.T) {
 	type eventCheck func(events []*auditinternal.Event) error
 

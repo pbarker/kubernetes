@@ -57,6 +57,10 @@ func (s *fakeAuditSink) Events() []*auditinternal.Event {
 	return append([]*auditinternal.Event{}, s.events...)
 }
 
+func (s *fakeAuditSink) Run(stopCh <-chan struct{}) error { return nil }
+func (s *fakeAuditSink) Shutdown()                        {}
+func (s *fakeAuditSink) String() string                   { return "fake" }
+
 func (s *fakeAuditSink) Pop(timeout time.Duration) (*auditinternal.Event, error) {
 	var result *auditinternal.Event
 	err := wait.Poll(50*time.Millisecond, wait.ForeverTestTimeout, wait.ConditionFunc(func() (done bool, err error) {

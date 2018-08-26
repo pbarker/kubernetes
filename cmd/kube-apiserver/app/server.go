@@ -448,9 +448,6 @@ func buildGenericConfig(
 	if lastErr = s.Authentication.ApplyTo(genericConfig); lastErr != nil {
 		return
 	}
-	if lastErr = s.Audit.ApplyTo(genericConfig); lastErr != nil {
-		return
-	}
 	if lastErr = s.Features.ApplyTo(genericConfig); lastErr != nil {
 		return
 	}
@@ -562,6 +559,9 @@ func buildGenericConfig(
 			},
 		}
 	}
+	if lastErr = s.Audit.ApplyTo(genericConfig, webhookAuthResolverWrapper, versionedInformers); lastErr != nil {
+		return
+	}
 	pluginInitializers, admissionPostStartHook, err = BuildAdmissionPluginInitializers(
 		s,
 		client,
@@ -573,7 +573,6 @@ func buildGenericConfig(
 		lastErr = fmt.Errorf("failed to create admission plugin initializer: %v", err)
 		return
 	}
-
 	err = s.Admission.ApplyTo(
 		genericConfig,
 		versionedInformers,

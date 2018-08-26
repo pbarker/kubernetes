@@ -50,6 +50,17 @@ type backend struct {
 	w *webhook.GenericWebhook
 }
 
+// NewDynamicBackend returns an audit backend configured from an api object that
+// sends events over HTTP to an external service.
+func NewDynamicBackend(rc *rest.RESTClient, initialBackoff time.Duration) audit.Backend {
+	return &backend{
+		w: &webhook.GenericWebhook{
+			RestClient:     rc,
+			InitialBackoff: initialBackoff,
+		},
+	}
+}
+
 // NewBackend returns an audit backend that sends events over HTTP to an external service.
 func NewBackend(kubeConfigFile string, groupVersion schema.GroupVersion, initialBackoff time.Duration) (audit.Backend, error) {
 	w, err := loadWebhook(kubeConfigFile, groupVersion, initialBackoff)
