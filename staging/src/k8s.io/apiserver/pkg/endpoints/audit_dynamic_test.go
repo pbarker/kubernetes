@@ -1,5 +1,5 @@
 /*
-Copyright 2017 The Kubernetes Authors.
+Copyright 2018 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -22,7 +22,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"regexp"
-	"sync"
 	"testing"
 	"time"
 
@@ -30,31 +29,13 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/wait"
 	auditinternal "k8s.io/apiserver/pkg/apis/audit"
+	auditpolicy "k8s.io/apiserver/pkg/audit/policy"
 	genericapitesting "k8s.io/apiserver/pkg/endpoints/testing"
 	"k8s.io/apiserver/pkg/registry/rest"
+	enforcedplugin "k8s.io/apiserver/plugin/pkg/audit/enforced"
 )
 
-type fakeAuditSink struct {
-	lock   sync.Mutex
-	events []*auditinternal.Event
-}
-
-func (s *fakeAuditSink) ProcessEvents(evs ...*auditinternal.Event) {
-	s.lock.Lock()
-	defer s.lock.Unlock()
-	s.events = append(s.events, evs...)
-}
-
-func (s *fakeAuditSink) Events() []*auditinternal.Event {
-	s.lock.Lock()
-	defer s.lock.Unlock()
-	return append([]*auditinternal.Event{}, s.events...)
-}
-
-func (s *fakeAuditSink) Run(stopCh <-chan struct{}) error { return nil }
-func (s *fakeAuditSink) Shutdown()                        {}
-func (s *fakeAuditSink) String() string                   { return "fake" }
-func TestAudit(t *testing.T) {
+func TestDyamicAudit(t *testing.T) {
 	type eventCheck func(events []*auditinternal.Event) error
 
 	// fixtures
@@ -281,7 +262,8 @@ func TestAudit(t *testing.T) {
 		},
 	} {
 		sink := &fakeAuditSink{}
-		handler := handleInternal(map[string]rest.Storage{
+		eb := enforcedplugin.NewBackend(sink, auditpolicy.FakeChecker(auditinternal.LevelRequestResponse, nil))
+		handler := handleInternalDynamic(map[string]rest.Storage{
 			"simple": &SimpleRESTStorage{
 				list: []genericapitesting.Simple{
 					{
@@ -298,7 +280,7 @@ func TestAudit(t *testing.T) {
 					Other:      "foo",
 				},
 			},
-		}, admissionControl, selfLinker, sink)
+		}, admissionControl, selfLinker, eb)
 
 		server := httptest.NewServer(handler)
 		defer server.Close()

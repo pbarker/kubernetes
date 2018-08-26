@@ -10,10 +10,14 @@ go_test(
     name = "go_default_test",
     srcs = [
         "checker_test.go",
+        "conversion_test.go",
+        "enforce_test.go",
         "reader_test.go",
     ],
     embed = [":go_default_library"],
     deps = [
+        "//staging/src/k8s.io/api/auditregistration/v1alpha1:go_default_library",
+        "//staging/src/k8s.io/apimachinery/pkg/runtime:go_default_library",
         "//staging/src/k8s.io/apimachinery/pkg/util/diff:go_default_library",
         "//staging/src/k8s.io/apiserver/pkg/apis/audit:go_default_library",
         "//staging/src/k8s.io/apiserver/pkg/authentication/user:go_default_library",
@@ -28,11 +32,15 @@ go_library(
     name = "go_default_library",
     srcs = [
         "checker.go",
+        "conversion.go",
+        "enforce.go",
         "reader.go",
     ],
     importmap = "k8s.io/kubernetes/vendor/k8s.io/apiserver/pkg/audit/policy",
     importpath = "k8s.io/apiserver/pkg/audit/policy",
     deps = [
+        "//staging/src/k8s.io/api/auditregistration/v1alpha1:go_default_library",
+        "//staging/src/k8s.io/apimachinery/pkg/apis/meta/v1:go_default_library",
         "//staging/src/k8s.io/apimachinery/pkg/runtime/schema:go_default_library",
         "//staging/src/k8s.io/apiserver/pkg/apis/audit:go_default_library",
         "//staging/src/k8s.io/apiserver/pkg/apis/audit/v1:go_default_library",

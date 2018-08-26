@@ -9,6 +9,7 @@ load(
 go_test(
     name = "go_default_test",
     srcs = [
+        "audit_dynamic_test.go",
         "audit_test.go",
         "authentication_test.go",
         "authn_audit_test.go",
@@ -27,11 +28,13 @@ go_test(
         "//staging/src/k8s.io/apimachinery/pkg/util/sets:go_default_library",
         "//staging/src/k8s.io/apimachinery/pkg/util/wait:go_default_library",
         "//staging/src/k8s.io/apiserver/pkg/apis/audit:go_default_library",
+        "//staging/src/k8s.io/apiserver/pkg/audit:go_default_library",
         "//staging/src/k8s.io/apiserver/pkg/audit/policy:go_default_library",
         "//staging/src/k8s.io/apiserver/pkg/authentication/authenticator:go_default_library",
         "//staging/src/k8s.io/apiserver/pkg/authentication/user:go_default_library",
         "//staging/src/k8s.io/apiserver/pkg/authorization/authorizer:go_default_library",
         "//staging/src/k8s.io/apiserver/pkg/endpoints/request:go_default_library",
+        "//staging/src/k8s.io/apiserver/plugin/pkg/audit/enforced:go_default_library",
         "//vendor/github.com/pborman/uuid:go_default_library",
         "//vendor/github.com/stretchr/testify/assert:go_default_library",
     ],
@@ -41,6 +44,7 @@ go_library(
     name = "go_default_library",
     srcs = [
         "audit.go",
+        "audit_dynamic.go",
         "authentication.go",
         "authn_audit.go",
         "authorization.go",
