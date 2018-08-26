@@ -115,6 +115,8 @@ type Config struct {
 	Version *version.Info
 	// AuditBackend is where audit events are sent to.
 	AuditBackend audit.Backend
+	// AuditDynamicConfiguration tells whether dynamic configuration is enabled
+	AuditDynamicConfiguration bool
 	// AuditPolicyChecker makes the decision of whether and how to audit log a request.
 	AuditPolicyChecker auditpolicy.Checker
 	// ExternalAddress is the host name to use for external (public internet) facing URLs (e.g. Swagger)
@@ -531,9 +533,18 @@ func DefaultBuildHandlerChain(apiHandler http.Handler, c *Config) http.Handler {
 	handler := genericapifilters.WithAuthorization(apiHandler, c.Authorization.Authorizer, c.Serializer)
 	handler = genericfilters.WithMaxInFlightLimit(handler, c.MaxRequestsInFlight, c.MaxMutatingRequestsInFlight, c.LongRunningFunc)
 	handler = genericapifilters.WithImpersonation(handler, c.Authorization.Authorizer, c.Serializer)
-	handler = genericapifilters.WithAudit(handler, c.AuditBackend, c.AuditPolicyChecker, c.LongRunningFunc)
 	failedHandler := genericapifilters.Unauthorized(c.Serializer, c.Authentication.SupportsBasicAuth)
-	failedHandler = genericapifilters.WithFailedAuthenticationAudit(failedHandler, c.AuditBackend, c.AuditPolicyChecker)
+	if utilfeature.DefaultFeatureGate.Enabled(features.DynamicAuditing) && c.AuditDynamicConfiguration {
+		handler = genericapifilters.WithDynamicAudit(handler, c.AuditBackend, c.LongRunningFunc)
+	} else {
+		handler = genericapifilters.WithAudit(handler, c.AuditBackend, c.AuditPolicyChecker, c.LongRunningFunc)
+	}
+	failedHandler := genericapifilters.Unauthorized(c.Serializer, c.Authentication.SupportsBasicAuth)
+	if utilfeature.DefaultFeatureGate.Enabled(features.DynamicAuditing) && c.AuditDynamicConfiguration {
+		failedHandler = genericapifilters.WithFailedAuthenticationDynamicAudit(failedHandler, c.AuditBackend)
+	} else {
+		failedHandler = genericapifilters.WithFailedAuthenticationAudit(failedHandler, c.AuditBackend, c.AuditPolicyChecker)
+	}
 	handler = genericapifilters.WithAuthentication(handler, c.Authentication.Authenticator, failedHandler)
 	handler = genericfilters.WithCORS(handler, c.CorsAllowedOriginList, nil, nil, nil, "true")
 	handler = genericfilters.WithTimeoutForNonLongRunningRequests(handler, c.LongRunningFunc, c.RequestTimeout)
