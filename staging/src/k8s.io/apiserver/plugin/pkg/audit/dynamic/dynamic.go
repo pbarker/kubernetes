@@ -170,7 +170,9 @@ func (d *dynamic) Run(stopCh <-chan struct{}) error {
 // subsequent shutdown methods
 func (d *dynamic) Shutdown() {
 	for _, b := range d.GetBackends() {
-		close(b.stopChan)
+		if !isChanClosed(b.stopChan) {
+			close(b.stopChan)
+		}
 		b.enforcedBackend.Shutdown()
 	}
 }
@@ -277,4 +279,14 @@ func (d *dynamic) createBackend(configuration *auditregv1alpha1.AuditSink) (*Bac
 		return nil, err
 	}
 	return backend, nil
+}
+
+// isChanClosed checks if a channel is closed
+func isChanClosed(ch <-chan struct{}) bool {
+	select {
+	case <-ch:
+		return true
+	default:
+	}
+	return false
 }
