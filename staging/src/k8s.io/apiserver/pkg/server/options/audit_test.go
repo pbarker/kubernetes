@@ -101,7 +101,7 @@ func TestAuditValidOptions(t *testing.T) {
 
 			assert.Empty(t, options.Validate(), "Options should be valid.")
 			config := &server.Config{}
-			require.NoError(t, options.ApplyTo(config))
+			require.NoError(t, options.ApplyTo(config, nil, nil))
 			if tc.expected == "" {
 				assert.Nil(t, config.AuditBackend)
 			} else {

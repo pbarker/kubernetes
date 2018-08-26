@@ -422,6 +422,13 @@ var etcdStorageData = map[schema.GroupVersionResource]struct {
 	},
 	// --
 
+	// k8s.io/kubernetes/pkg/apis/auditregistration/v1alpha1
+	gvr("auditregistration.k8s.io", "v1alpha1", "auditsinks"): {
+		stub:             `{"metadata":{"name":"ac1"},"spec":{"policy":{"rules":[{"level":"Metadata"}]},"backend":{"webhook":{"clientConfig":{"url":"http://localhost:4444","service":null,"caBundle":null}}}}}`,
+		expectedEtcdPath: "/registry/auditsinks/ac1",
+	},
+	// --
+
 	// k8s.io/kubernetes/pkg/apis/scheduling/v1alpha1
 	gvr("scheduling.k8s.io", "v1alpha1", "priorityclasses"): {
 		stub:             `{"metadata":{"name":"pc1"},"Value":1000}`,

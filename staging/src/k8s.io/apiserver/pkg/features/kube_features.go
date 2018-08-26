@@ -43,6 +43,13 @@ const (
 	// audited.
 	AdvancedAuditing utilfeature.Feature = "AdvancedAuditing"
 
+	// owner: @pbarker
+	// alpha: v1.12
+	//
+	// DynamicAuditing enables configuration of advanced audit policy and webhook backends through an
+	// api object synced with a shared informer
+	DynamicAuditing utilfeature.Feature = "DynamicAuditing"
+
 	// owner: @ilackams
 	// alpha: v1.7
 	//
@@ -83,6 +90,7 @@ func init() {
 var defaultKubernetesFeatureGates = map[utilfeature.Feature]utilfeature.FeatureSpec{
 	StreamingProxyRedirects: {Default: true, PreRelease: utilfeature.Beta},
 	AdvancedAuditing:        {Default: true, PreRelease: utilfeature.Beta},
+	DynamicAuditing:         {Default: false, PreRelease: utilfeature.Alpha},
 	APIResponseCompression:  {Default: false, PreRelease: utilfeature.Alpha},
 	Initializers:            {Default: false, PreRelease: utilfeature.Alpha},
 	APIListChunking:         {Default: true, PreRelease: utilfeature.Beta},

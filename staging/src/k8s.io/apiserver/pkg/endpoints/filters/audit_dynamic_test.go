@@ -1,5 +1,5 @@
 /*
-Copyright 2016 The Kubernetes Authors.
+Copyright 2018 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -32,36 +32,44 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/wait"
 	auditinternal "k8s.io/apiserver/pkg/apis/audit"
+	"k8s.io/apiserver/pkg/audit"
 	"k8s.io/apiserver/pkg/audit/policy"
 	"k8s.io/apiserver/pkg/authentication/user"
+	"k8s.io/apiserver/pkg/authorization/authorizer"
 	"k8s.io/apiserver/pkg/endpoints/request"
 )
 
-type fakeAuditSink struct {
-	lock   sync.Mutex
-	events []*auditinternal.Event
+type fakeEnforcedAuditSink struct {
+	lock          sync.Mutex
+	events        []*auditinternal.Event
+	policyChecker policy.Checker
 }
 
-func (s *fakeAuditSink) ProcessEvents(evs ...*auditinternal.Event) {
+func (s *fakeEnforcedAuditSink) ProcessEnforcedEvents(evs ...*audit.EnforcedEvent) {
 	s.lock.Lock()
 	defer s.lock.Unlock()
 	for _, e := range evs {
-		event := e.DeepCopy()
+		event := e.Event.DeepCopy()
+		level, omitStages := s.policyChecker.LevelAndStages(e.Attributes)
+		audit.ObservePolicyLevel(level)
+		if level == auditinternal.LevelNone {
+			continue
+		}
+		event = policy.EnforcePolicy(event, level, omitStages)
+		if event == nil {
+			continue
+		}
 		s.events = append(s.events, event)
 	}
 }
 
-func (s *fakeAuditSink) Events() []*auditinternal.Event {
+func (s *fakeEnforcedAuditSink) Events() []*auditinternal.Event {
 	s.lock.Lock()
 	defer s.lock.Unlock()
 	return append([]*auditinternal.Event{}, s.events...)
 }
 
-func (s *fakeAuditSink) Run(stopCh <-chan struct{}) error { return nil }
-func (s *fakeAuditSink) Shutdown()                        {}
-func (s *fakeAuditSink) String() string                   { return "fake" }
-
-func (s *fakeAuditSink) Pop(timeout time.Duration) (*auditinternal.Event, error) {
+func (s *fakeEnforcedAuditSink) Pop(timeout time.Duration) (*auditinternal.Event, error) {
 	var result *auditinternal.Event
 	err := wait.Poll(50*time.Millisecond, wait.ForeverTestTimeout, wait.ConditionFunc(func() (done bool, err error) {
 		s.lock.Lock()
@@ -76,43 +84,43 @@ func (s *fakeAuditSink) Pop(timeout time.Duration) (*auditinternal.Event, error)
 	return result, err
 }
 
-type simpleResponseWriter struct{}
+type simpleDynamicResponseWriter struct{}
 
-var _ http.ResponseWriter = &simpleResponseWriter{}
+var _ http.ResponseWriter = &simpleDynamicResponseWriter{}
 
-func (*simpleResponseWriter) WriteHeader(code int)         {}
-func (*simpleResponseWriter) Write(bs []byte) (int, error) { return len(bs), nil }
-func (*simpleResponseWriter) Header() http.Header          { return http.Header{} }
+func (*simpleDynamicResponseWriter) WriteHeader(code int)         {}
+func (*simpleDynamicResponseWriter) Write(bs []byte) (int, error) { return len(bs), nil }
+func (*simpleDynamicResponseWriter) Header() http.Header          { return http.Header{} }
 
-type fancyResponseWriter struct {
-	simpleResponseWriter
+type fancyDynamicResponseWriter struct {
+	simpleDynamicResponseWriter
 }
 
-func (*fancyResponseWriter) CloseNotify() <-chan bool { return nil }
+func (*fancyDynamicResponseWriter) CloseNotify() <-chan bool { return nil }
 
-func (*fancyResponseWriter) Flush() {}
+func (*fancyDynamicResponseWriter) Flush() {}
 
-func (*fancyResponseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) { return nil, nil, nil }
+func (*fancyDynamicResponseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) { return nil, nil, nil }
 
-func TestConstructResponseWriter(t *testing.T) {
-	actual := decorateResponseWriter(&simpleResponseWriter{}, nil, nil, nil)
+func TestConstructDynamicResponseWriter(t *testing.T) {
+	actual := decorateDynamicResponseWriter(&simpleDynamicResponseWriter{}, nil, nil, nil)
 	switch v := actual.(type) {
-	case *auditResponseWriter:
+	case *auditDynamicResponseWriter:
 	default:
-		t.Errorf("Expected auditResponseWriter, got %v", reflect.TypeOf(v))
+		t.Errorf("Expected auditDynamicResponseWriter, got %v", reflect.TypeOf(v))
 	}
 
-	actual = decorateResponseWriter(&fancyResponseWriter{}, nil, nil, nil)
+	actual = decorateDynamicResponseWriter(&fancyDynamicResponseWriter{}, nil, nil, nil)
 	switch v := actual.(type) {
-	case *fancyResponseWriterDelegator:
+	case *fancyDynamicResponseWriterDelegator:
 	default:
-		t.Errorf("Expected fancyResponseWriterDelegator, got %v", reflect.TypeOf(v))
+		t.Errorf("Expected fancyDynamicResponseWriterDelegator, got %v", reflect.TypeOf(v))
 	}
 }
 
-func TestDecorateResponseWriterWithoutChannel(t *testing.T) {
+func TestDecorateDynamicResponseWriterWithoutChannel(t *testing.T) {
 	ev := &auditinternal.Event{}
-	actual := decorateResponseWriter(&simpleResponseWriter{}, ev, nil, nil)
+	actual := decorateDynamicResponseWriter(&simpleResponseWriter{}, ev, nil, nil)
 
 	// write status. This will not block because firstEventSentCh is nil
 	actual.WriteHeader(42)
@@ -124,9 +132,10 @@ func TestDecorateResponseWriterWithoutChannel(t *testing.T) {
 	}
 }
 
-func TestDecorateResponseWriterWithImplicitWrite(t *testing.T) {
+func TestDecorateDynamicResponseWriterWithImplicitWrite(t *testing.T) {
 	ev := &auditinternal.Event{}
-	actual := decorateResponseWriter(&simpleResponseWriter{}, ev, nil, nil)
+	attribs := authorizer.AttributesRecord{}
+	actual := decorateDynamicResponseWriter(&simpleResponseWriter{}, ev, attribs, nil)
 
 	// write status. This will not block because firstEventSentCh is nil
 	actual.Write([]byte("foo"))
@@ -138,10 +147,12 @@ func TestDecorateResponseWriterWithImplicitWrite(t *testing.T) {
 	}
 }
 
-func TestDecorateResponseWriterChannel(t *testing.T) {
-	sink := &fakeAuditSink{}
-	ev := &auditinternal.Event{}
-	actual := decorateResponseWriter(&simpleResponseWriter{}, ev, sink, nil)
+func TestDecorateDynamicResponseWriterChannel(t *testing.T) {
+	policyChecker := policy.FakeChecker(auditinternal.LevelRequestResponse, nil)
+	attribs := authorizer.AttributesRecord{}
+	sink := &fakeEnforcedAuditSink{policyChecker: policyChecker}
+	ev := &auditinternal.Event{Level: auditinternal.LevelRequestResponse}
+	actual := decorateDynamicResponseWriter(&simpleDynamicResponseWriter{}, ev, attribs, sink)
 
 	done := make(chan struct{})
 	go func() {
@@ -177,13 +188,7 @@ func TestDecorateResponseWriterChannel(t *testing.T) {
 	}
 }
 
-type fakeHTTPHandler struct{}
-
-func (*fakeHTTPHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
-	w.WriteHeader(200)
-}
-
-func TestAudit(t *testing.T) {
+func TestDynamicAudit(t *testing.T) {
 	shortRunningPath := "/api/v1/namespaces/default/pods/foo"
 	longRunningPath := "/api/v1/namespaces/default/pods?watch=true"
 
@@ -669,9 +674,9 @@ func TestAudit(t *testing.T) {
 		},
 	} {
 		t.Run(test.desc, func(t *testing.T) {
-			sink := &fakeAuditSink{}
 			policyChecker := policy.FakeChecker(auditinternal.LevelRequestResponse, test.omitStages)
-			handler := WithAudit(http.HandlerFunc(test.handler), sink, policyChecker, func(r *http.Request, ri *request.RequestInfo) bool {
+			sink := &fakeEnforcedAuditSink{policyChecker: policyChecker}
+			handler := WithDynamicAudit(http.HandlerFunc(test.handler), sink, func(r *http.Request, ri *request.RequestInfo) bool {
 				// simplified long-running check
 				return ri.Verb == "watch"
 			})
@@ -738,23 +743,23 @@ func TestAudit(t *testing.T) {
 	}
 }
 
-func TestAuditNoPanicOnNilUser(t *testing.T) {
+func TestDynamicAuditNoPanicOnNilUser(t *testing.T) {
 	policyChecker := policy.FakeChecker(auditinternal.LevelRequestResponse, nil)
-	handler := WithAudit(&fakeHTTPHandler{}, &fakeAuditSink{}, policyChecker, nil)
+	handler := WithDynamicAudit(&fakeHTTPHandler{}, &fakeEnforcedAuditSink{policyChecker: policyChecker}, nil)
 	req, _ := http.NewRequest("GET", "/api/v1/namespaces/default/pods", nil)
 	req = withTestContext(req, nil, nil)
 	req.RemoteAddr = "127.0.0.1"
 	handler.ServeHTTP(httptest.NewRecorder(), req)
 }
 
-func TestAuditLevelNone(t *testing.T) {
-	sink := &fakeAuditSink{}
+func TestDynamicAuditLevelNone(t *testing.T) {
+	policyChecker := policy.FakeChecker(auditinternal.LevelNone, nil)
+	sink := &fakeEnforcedAuditSink{policyChecker: policyChecker}
 	var handler http.Handler
 	handler = http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(200)
 	})
-	policyChecker := policy.FakeChecker(auditinternal.LevelNone, nil)
-	handler = WithAudit(handler, sink, policyChecker, nil)
+	handler = WithDynamicAudit(handler, sink, nil)
 
 	req, _ := http.NewRequest("GET", "/api/v1/namespaces/default/pods", nil)
 	req.RemoteAddr = "127.0.0.1"
@@ -766,25 +771,13 @@ func TestAuditLevelNone(t *testing.T) {
 	}
 }
 
-func TestAuditIDHttpHeader(t *testing.T) {
+func TestDynamicAuditIDHttpHeader(t *testing.T) {
 	for _, test := range []struct {
 		desc           string
 		requestHeader  string
 		level          auditinternal.Level
 		expectedHeader bool
 	}{
-		{
-			"no http header when there is no audit",
-			"",
-			auditinternal.LevelNone,
-			false,
-		},
-		{
-			"no http header when there is no audit even the request header specified",
-			uuid.NewRandom().String(),
-			auditinternal.LevelNone,
-			false,
-		},
 		{
 			"server generated header",
 			"",
@@ -798,13 +791,13 @@ func TestAuditIDHttpHeader(t *testing.T) {
 			true,
 		},
 	} {
-		sink := &fakeAuditSink{}
+		policyChecker := policy.FakeChecker(test.level, nil)
+		sink := &fakeEnforcedAuditSink{policyChecker: policyChecker}
 		var handler http.Handler
 		handler = http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			w.WriteHeader(200)
 		})
-		policyChecker := policy.FakeChecker(test.level, nil)
-		handler = WithAudit(handler, sink, policyChecker, nil)
+		handler = WithDynamicAudit(handler, sink, nil)
 
 		req, _ := http.NewRequest("GET", "/api/v1/namespaces/default/pods", nil)
 		req.RemoteAddr = "127.0.0.1"
@@ -833,7 +826,7 @@ func TestAuditIDHttpHeader(t *testing.T) {
 	}
 }
 
-func withTestContext(req *http.Request, user user.Info, audit *auditinternal.Event) *http.Request {
+func withDynamicTestContext(req *http.Request, user user.Info, audit *auditinternal.Event) *http.Request {
 	ctx := req.Context()
 	if user != nil {
 		ctx = request.WithUser(ctx, user)

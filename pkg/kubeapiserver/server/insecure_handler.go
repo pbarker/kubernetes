@@ -33,7 +33,9 @@ import (
 
 func BuildInsecureHandlerChain(apiHandler http.Handler, c *server.Config) http.Handler {
 	handler := apiHandler
-	if utilfeature.DefaultFeatureGate.Enabled(features.AdvancedAuditing) {
+	if utilfeature.DefaultFeatureGate.Enabled(features.DynamicAuditing) && c.AuditDynamicConfiguration {
+		handler = genericapifilters.WithDynamicAudit(handler, c.AuditEnforcedBackend, c.LongRunningFunc)
+	} else if utilfeature.DefaultFeatureGate.Enabled(features.AdvancedAuditing) {
 		handler = genericapifilters.WithAudit(handler, c.AuditBackend, c.AuditPolicyChecker, c.LongRunningFunc)
 	} else {
 		handler = genericapifilters.WithLegacyAudit(handler, c.LegacyAuditWriter)

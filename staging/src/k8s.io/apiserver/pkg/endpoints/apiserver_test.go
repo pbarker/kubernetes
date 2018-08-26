@@ -274,6 +274,63 @@ func handleInternal(storage map[string]rest.Storage, admissionControl admission.
 	return &defaultAPIServer{handler, container}
 }
 
+func handleInternalDynamic(storage map[string]rest.Storage, admissionControl admission.Interface, selfLinker runtime.SelfLinker, auditSink audit.EnforcedSink) http.Handler {
+	container := restful.NewContainer()
+	container.Router(restful.CurlyRouter{})
+	mux := container.ServeMux
+	template := APIGroupVersion{
+		Storage:         storage,
+		Creater:         scheme,
+		Convertor:       scheme,
+		UnsafeConvertor: runtime.UnsafeObjectConvertor(scheme),
+		Defaulter:       scheme,
+		Typer:           scheme,
+		Linker:          selfLinker,
+		RootScopedKinds: sets.NewString("SimpleRoot"),
+		ParameterCodec:  parameterCodec,
+		Admit:           admissionControl,
+	}
+	// groupless v1 version
+	{
+		group := template
+		group.Root = "/" + grouplessPrefix
+		group.GroupVersion = grouplessGroupVersion
+		group.OptionsExternalVersion = &grouplessGroupVersion
+		group.Serializer = codecs
+		if err := (&group).InstallREST(container); err != nil {
+			panic(fmt.Sprintf("unable to install container %s: %v", group.GroupVersion, err))
+		}
+	}
+	// group version 1
+	{
+		group := template
+		group.Root = "/" + prefix
+		group.GroupVersion = testGroupVersion
+		group.OptionsExternalVersion = &testGroupVersion
+		group.Serializer = codecs
+		if err := (&group).InstallREST(container); err != nil {
+			panic(fmt.Sprintf("unable to install container %s: %v", group.GroupVersion, err))
+		}
+	}
+	// group version 2
+	{
+		group := template
+		group.Root = "/" + prefix
+		group.GroupVersion = newGroupVersion
+		group.OptionsExternalVersion = &newGroupVersion
+		group.Serializer = codecs
+		if err := (&group).InstallREST(container); err != nil {
+			panic(fmt.Sprintf("unable to install container %s: %v", group.GroupVersion, err))
+		}
+	}
+	handler := genericapifilters.WithDynamicAudit(mux, auditSink, func(r *http.Request, requestInfo *request.RequestInfo) bool {
+		// simplified long-running check
+		return requestInfo.Verb == "watch" || requestInfo.Verb == "proxy"
+	})
+	handler = genericapifilters.WithRequestInfo(handler, testRequestInfoResolver())
+	return &defaultAPIServer{handler, container}
+}
+
 func testRequestInfoResolver() *request.RequestInfoFactory {
 	return &request.RequestInfoFactory{
 		APIPrefixes:          sets.NewString("api", "apis"),
