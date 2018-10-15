@@ -112,7 +112,7 @@ func (c *FakeAuditSinks) DeleteCollection(options *v1.DeleteOptions, listOptions
 // Patch applies the patch and returns the patched auditSink.
 func (c *FakeAuditSinks) Patch(name string, pt types.PatchType, data []byte, subresources ...string) (result *auditregistration.AuditSink, err error) {
 	obj, err := c.Fake.
-		Invokes(testing.NewRootPatchSubresourceAction(auditsinksResource, name, data, subresources...), &auditregistration.AuditSink{})
+		Invokes(testing.NewRootPatchSubresourceAction(auditsinksResource, name, pt, data, subresources...), &auditregistration.AuditSink{})
 	if obj == nil {
 		return nil, err
 	}
