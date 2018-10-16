@@ -435,6 +435,13 @@ func GetEtcdStorageData() map[schema.GroupVersionResource]StorageData {
 			ExpectedEtcdPath: "/registry/apiextensions.k8s.io/customresourcedefinitions/openshiftwebconsoleconfigs.webconsole.operator.openshift.io",
 		},
 		// --
+
+		// k8s.io/kubernetes/pkg/apis/auditregistration/v1alpha1
+		gvr("auditregistration.k8s.io", "v1alpha1", "auditsinks"): {
+			Stub:             `{"metadata":{"name":"sink1"},"spec":{"policy":{"level":"Metadata","stages":["ResponseStarted"]},"webhook":{"clientConfig":{"url":"http://localhost:4444","service":null,"caBundle":null}}}}`,
+			ExpectedEtcdPath: "/registry/auditsinks/sink1",
+		},
+		// --
 	}
 }
 
