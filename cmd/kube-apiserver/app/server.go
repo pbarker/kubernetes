@@ -438,9 +438,6 @@ func buildGenericConfig(
 	if lastErr = s.Authentication.ApplyTo(genericConfig); lastErr != nil {
 		return
 	}
-	if lastErr = s.Audit.ApplyTo(genericConfig); lastErr != nil {
-		return
-	}
 	if lastErr = s.Features.ApplyTo(genericConfig); lastErr != nil {
 		return
 	}
@@ -504,19 +501,27 @@ func buildGenericConfig(
 		genericConfig.DisabledPostStartHooks.Insert(rbacrest.PostStartHookName)
 	}
 
-	admissionConfig := &kubeapiserveradmission.AdmissionConfig{
-		ExternalInformers:    versionedInformers,
+	webhookConfig := kubeapiserveradmission.WebhookConfig{
 		LoopbackClientConfig: genericConfig.LoopbackClientConfig,
-		CloudConfigFile:      s.CloudProvider.CloudConfigFile,
 	}
-	serviceResolver = buildServiceResolver(s.EnableAggregatorRouting, genericConfig.LoopbackClientConfig.Host, versionedInformers)
+	admissionConfig := &kubeapiserveradmission.AdmissionConfig{
+		WebhookConfig:     webhookConfig,
+		ExternalInformers: versionedInformers,
+		CloudConfigFile:   s.CloudProvider.CloudConfigFile,
+	}
+	genericConfig.Webhook.ServiceResolver = buildServiceResolver(s.EnableAggregatorRouting, genericConfig.LoopbackClientConfig.Host, versionedInformers)
 
-	pluginInitializers, admissionPostStartHook, err = admissionConfig.New(proxyTransport, serviceResolver)
+	genericConfig.Webhook.AuthInfoResolverWrapper = webhookConfig.BuildAuthnInfoResolver(proxyTransport)
+
+	if lastErr = s.Audit.ApplyTo(genericConfig); lastErr != nil {
+		return
+	}
+
+	pluginInitializers, admissionPostStartHook, err = admissionConfig.New(proxyTransport, genericConfig.Webhook.ServiceResolver)
 	if err != nil {
 		lastErr = fmt.Errorf("failed to create admission plugin initializer: %v", err)
 		return
 	}
-
 	err = s.Admission.ApplyTo(
 		genericConfig,
 		versionedInformers,

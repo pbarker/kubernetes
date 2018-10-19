@@ -60,6 +60,7 @@ import (
 	serverstore "k8s.io/apiserver/pkg/server/storage"
 	utilfeature "k8s.io/apiserver/pkg/util/feature"
 	"k8s.io/apiserver/pkg/util/logs"
+	"k8s.io/apiserver/pkg/util/webhook"
 	"k8s.io/client-go/informers"
 	restclient "k8s.io/client-go/rest"
 	certutil "k8s.io/client-go/util/cert"
@@ -88,6 +89,9 @@ type Config struct {
 
 	// Authorization is the configuration for authorization
 	Authorization AuthorizationInfo
+
+	// Webhook is the configuration for outgoing webhooks
+	Webhook WebhookInfo
 
 	// LoopbackClientConfig is a config for a privileged loopback connection to the API server
 	// This is required for proper functioning of the PostStartHooks on a GenericAPIServer
@@ -242,6 +246,15 @@ type AuthorizationInfo struct {
 	// Authorizer determines whether the subject is allowed to make the request based only
 	// on the RequestURI
 	Authorizer authorizer.Authorizer
+}
+
+type WebhookInfo struct {
+	// AuthInfoResolverWrapper provides the base authentication info wrapper
+	// for all outgoing webhooks
+	AuthInfoResolverWrapper webhook.AuthenticationInfoResolverWrapper
+	// ServiceResolver provides configuration for outgoing webhooks to
+	// in-cluster services
+	ServiceResolver webhook.ServiceResolver
 }
 
 // NewConfig returns a Config struct with the default values

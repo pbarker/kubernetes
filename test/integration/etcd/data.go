@@ -155,6 +155,13 @@ func GetEtcdStorageData() map[schema.GroupVersionResource]StorageData {
 		},
 		// --
 
+		// k8s.io/kubernetes/pkg/apis/auditregistration/v1alpha1
+		gvr("auditregistration.k8s.io", "v1alpha1", "auditsinks"): {
+			Stub:             `{"metadata":{"name":"sink1"},"spec":{"policy":{"level":"Metadata","stages":["ResponseStarted"]},"webhook":{"clientConfig":{"url":"http://localhost:4444","service":null,"caBundle":null}}}}`,
+			ExpectedEtcdPath: "/registry/auditsinks/sink1",
+		},
+		// --
+
 		// k8s.io/kubernetes/pkg/apis/autoscaling/v1
 		gvr("autoscaling", "v1", "horizontalpodautoscalers"): {
 			Stub:             `{"metadata": {"name": "hpa2"}, "spec": {"maxReplicas": 3, "scaleTargetRef": {"kind": "something", "name": "cross"}}}`,

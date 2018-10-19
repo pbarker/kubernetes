@@ -90,6 +90,9 @@ func TestAudit(t *testing.T) {
 	}
 	requestBodyMatches := func(i int, pattern string) eventCheck {
 		return func(events []*auditinternal.Event) error {
+			if events[i].RequestObject == nil {
+				return fmt.Errorf("expected non nil request object")
+			}
 			if matched, _ := regexp.Match(pattern, events[i].RequestObject.Raw); !matched {
 				return fmt.Errorf("expected RequestBody to match %q, but didn't: %q", pattern, string(events[i].RequestObject.Raw))
 			}
@@ -106,6 +109,9 @@ func TestAudit(t *testing.T) {
 	}
 	responseBodyMatches := func(i int, pattern string) eventCheck {
 		return func(events []*auditinternal.Event) error {
+			if events[i].ResponseObject == nil {
+				return fmt.Errorf("expected non nil response object")
+			}
 			if matched, _ := regexp.Match(pattern, events[i].ResponseObject.Raw); !matched {
 				return fmt.Errorf("expected ResponseBody to match %q, but didn't: %q", pattern, string(events[i].ResponseObject.Raw))
 			}
@@ -140,8 +146,8 @@ func TestAudit(t *testing.T) {
 			200,
 			2,
 			[]eventCheck{
-				noRequestBody(0),
-				responseBodyMatches(0, `{.*"name":"c".*}`),
+				noRequestBody(1),
+				responseBodyMatches(1, `{.*"name":"c".*}`),
 			},
 		},
 		{
@@ -157,8 +163,8 @@ func TestAudit(t *testing.T) {
 			200,
 			2,
 			[]eventCheck{
-				noRequestBody(0),
-				responseBodyMatches(0, `{.*"name":"a".*"name":"b".*}`),
+				noRequestBody(1),
+				responseBodyMatches(1, `{.*"name":"a".*"name":"b".*}`),
 			},
 		},
 		{
@@ -170,8 +176,8 @@ func TestAudit(t *testing.T) {
 			201,
 			2,
 			[]eventCheck{
-				requestBodyIs(0, string(simpleFooJSON)),
-				responseBodyMatches(0, `{.*"foo".*}`),
+				requestBodyIs(1, string(simpleFooJSON)),
+				responseBodyMatches(1, `{.*"foo".*}`),
 			},
 		},
 		{
@@ -183,8 +189,8 @@ func TestAudit(t *testing.T) {
 			405,
 			2,
 			[]eventCheck{
-				noRequestBody(0),  // the 405 is thrown long before the create handler would be executed
-				noResponseBody(0), // the 405 is thrown long before the create handler would be executed
+				noRequestBody(1),  // the 405 is thrown long before the create handler would be executed
+				noResponseBody(1), // the 405 is thrown long before the create handler would be executed
 			},
 		},
 		{
@@ -196,8 +202,8 @@ func TestAudit(t *testing.T) {
 			200,
 			2,
 			[]eventCheck{
-				noRequestBody(0),
-				responseBodyMatches(0, `{.*"kind":"Status".*"status":"Success".*}`),
+				noRequestBody(1),
+				responseBodyMatches(1, `{.*"kind":"Status".*"status":"Success".*}`),
 			},
 		},
 		{
@@ -209,8 +215,8 @@ func TestAudit(t *testing.T) {
 			200,
 			2,
 			[]eventCheck{
-				requestBodyMatches(0, "DeleteOptions"),
-				responseBodyMatches(0, `{.*"kind":"Status".*"status":"Success".*}`),
+				requestBodyMatches(1, "DeleteOptions"),
+				responseBodyMatches(1, `{.*"kind":"Status".*"status":"Success".*}`),
 			},
 		},
 		{
@@ -222,8 +228,8 @@ func TestAudit(t *testing.T) {
 			200,
 			2,
 			[]eventCheck{
-				requestBodyIs(0, string(simpleCPrimeJSON)),
-				responseBodyMatches(0, `{.*"bla".*}`),
+				requestBodyIs(1, string(simpleCPrimeJSON)),
+				responseBodyMatches(1, `{.*"bla".*}`),
 			},
 		},
 		{
@@ -235,8 +241,8 @@ func TestAudit(t *testing.T) {
 			400,
 			2,
 			[]eventCheck{
-				requestBodyIs(0, string(simpleCPrimeJSON)),
-				responseBodyMatches(0, `"Status".*"status":"Failure".*"code":400}`),
+				requestBodyIs(1, string(simpleCPrimeJSON)),
+				responseBodyMatches(1, `"Status".*"status":"Failure".*"code":400}`),
 			},
 		},
 		{
@@ -255,8 +261,8 @@ func TestAudit(t *testing.T) {
 			200,
 			2,
 			[]eventCheck{
-				requestBodyIs(0, `{"labels":{"foo":"bar"}}`),
-				responseBodyMatches(0, `"name":"c".*"labels":{"foo":"bar"}`),
+				requestBodyIs(1, `{"labels":{"foo":"bar"}}`),
+				responseBodyMatches(1, `"name":"c".*"labels":{"foo":"bar"}`),
 			},
 		},
 		{
@@ -272,8 +278,8 @@ func TestAudit(t *testing.T) {
 			200,
 			3,
 			[]eventCheck{
-				noRequestBody(0),
-				noResponseBody(0),
+				noRequestBody(1),
+				noResponseBody(1),
 			},
 		},
 	} {

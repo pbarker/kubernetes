@@ -271,10 +271,7 @@ func (b *bufferedBackend) ProcessEvents(ev ...*auditinternal.Event) {
 
 	for i, e := range ev {
 		evIndex = i
-		// Per the audit.Backend interface these events are reused after being
-		// sent to the Sink. Deep copy and send the copy to the queue.
 		event := e.DeepCopy()
-
 		select {
 		case b.buffer <- event:
 		default:

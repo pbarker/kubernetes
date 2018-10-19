@@ -38,24 +38,24 @@ import (
 	quotainstall "k8s.io/kubernetes/pkg/quota/v1/install"
 )
 
-type AdmissionConfig struct {
-	CloudConfigFile      string
+// WebhookConfig holds the configuration for outgoing webhooks
+type WebhookConfig struct {
 	LoopbackClientConfig *rest.Config
-	ExternalInformers    externalinformers.SharedInformerFactory
 }
 
-func (c *AdmissionConfig) buildAuthnInfoResolver(proxyTransport *http.Transport) webhook.AuthenticationInfoResolverWrapper {
+// BuildAuthnInfoResolver builds an auth resolver for outgoing webhooks
+func (w *WebhookConfig) BuildAuthnInfoResolver(proxyTransport *http.Transport) webhook.AuthenticationInfoResolverWrapper {
 	webhookAuthResolverWrapper := func(delegate webhook.AuthenticationInfoResolver) webhook.AuthenticationInfoResolver {
 		return &webhook.AuthenticationInfoResolverDelegator{
 			ClientConfigForFunc: func(server string) (*rest.Config, error) {
 				if server == "kubernetes.default.svc" {
-					return c.LoopbackClientConfig, nil
+					return w.LoopbackClientConfig, nil
 				}
 				return delegate.ClientConfigFor(server)
 			},
 			ClientConfigForServiceFunc: func(serviceName, serviceNamespace string) (*rest.Config, error) {
 				if serviceName == "kubernetes" && serviceNamespace == v1.NamespaceDefault {
-					return c.LoopbackClientConfig, nil
+					return w.LoopbackClientConfig, nil
 				}
 				ret, err := delegate.ClientConfigForService(serviceName, serviceNamespace)
 				if err != nil {
@@ -71,8 +71,15 @@ func (c *AdmissionConfig) buildAuthnInfoResolver(proxyTransport *http.Transport)
 	return webhookAuthResolverWrapper
 }
 
+// AdmissionConfig holds the configuration for initializing the admission plugins
+type AdmissionConfig struct {
+	WebhookConfig
+	CloudConfigFile   string
+	ExternalInformers externalinformers.SharedInformerFactory
+}
+
 func (c *AdmissionConfig) New(proxyTransport *http.Transport, serviceResolver webhook.ServiceResolver) ([]admission.PluginInitializer, server.PostStartHookFunc, error) {
-	webhookAuthResolverWrapper := c.buildAuthnInfoResolver(proxyTransport)
+	webhookAuthResolverWrapper := c.BuildAuthnInfoResolver(proxyTransport)
 	webhookPluginInitializer := webhookinit.NewPluginInitializer(webhookAuthResolverWrapper, serviceResolver)
 
 	var cloudConfig []byte
