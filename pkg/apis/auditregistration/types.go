@@ -106,6 +106,25 @@ type Policy struct {
 	// Stages is a list of stages for which events are created.
 	// +optional
 	Stages []Stage
+
+	// ClassRules define how classes should be handled
+	// +optional
+	ClassRules []ClassRule
+}
+
+// ClassRule defines how a class is handled per sink
+type ClassRule struct {
+	// Name of the AuditClass object
+	Name string
+
+	// The Level that all requests are recorded at.
+	// available options: None, Metadata, Request, RequestResponse
+	// required
+	Level Level
+
+	// Stages is a list of stages for which events are created.
+	// +optional
+	Stages []Stage
 }
 
 // Webhook holds the configuration of the webhooks
@@ -193,4 +212,103 @@ type ServiceReference struct {
 	// this service.
 	// +optional
 	Path *string
+}
+
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+
+// AuditClass is a set of rules that categorize requests
+type AuditClass struct {
+	metav1.TypeMeta
+
+	// +optional
+	metav1.ObjectMeta
+
+	// Spec defines the audit class spec
+	Spec AuditClassSpec
+}
+
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+
+// AuditClassList is a list of AuditClass items
+type AuditClassList struct {
+	metav1.TypeMeta
+
+	// +optional
+	metav1.ListMeta
+
+	// List of audit classes
+	Items []AuditClass
+}
+
+// AuditClassSpec is the spec for the audit class
+type AuditClassSpec struct {
+	// AttributeGroups defines a list of AttributeGroups
+	AttributeGroups []AttributeGroup
+}
+
+// AttributeGroup is a grouping of request attributes
+type AttributeGroup struct {
+	// The users (by authenticated user name) in this attribute group.
+	// An empty list implies every user.
+	// +optional
+	Users []string
+	// The user groups in this attribute group. A user is considered matching
+	// if it is a member of any of the UserGroups.
+	// An empty list implies every user group.
+	// +optional
+	UserGroups []string
+
+	// The verbs included in this attribute group.
+	// An empty list implies every verb.
+	// +optional
+	Verbs []string
+
+	// Attribute groups can apply to API resources (such as "pods" or "secrets"),
+	// non-resource URL paths (such as "/api"), or neither, but not both.
+	// If neither is specified, the attribute group is treated as a default for all URLs.
+
+	// Resources in this attribute group. An empty list implies all kinds in all API groups.
+	// +optional
+	Resources []GroupResources
+	// Namespaces in this attribute group.
+	// The empty string "" matches non-namespaced resources.
+	// An empty list implies every namespace.
+	// +optional
+	Namespaces []string
+
+	// NonResourceURLs is a set of URL paths that should be audited.
+	// *s are allowed, but only as the full, final step in the path.
+	// Examples:
+	//  "/metrics" - Log requests for apiserver metrics
+	//  "/healthz*" - Log all health checks
+	// +optional
+	NonResourceURLs []string
+}
+
+// GroupResources represents resource kinds in an API group.
+type GroupResources struct {
+	// Group is the name of the API group that contains the resources.
+	// The empty string represents the core API group.
+	// +optional
+	Group string
+	// Resources is a list of resources in this group.
+	//
+	// For example:
+	// 'pods' matches pods.
+	// 'pods/log' matches the log subresource of pods.
+	// '*' matches all resources and their subresources.
+	// 'pods/*' matches all subresources of pods.
+	// '*/scale' matches all scale subresources.
+	//
+	// If wildcard is present, the validation rule will ensure resources do not
+	// overlap with each other.
+	//
+	// An empty list implies all resources and subresources in this API groups apply.
+	// +optional
+	Resources []string
+	// ResourceNames is a list of resource instance names in this group.
+	// Using this field requires Resources to be specified.
+	// An empty list implies that every instance of the resource is matched.
+	// +optional
+	ResourceNames []string
 }

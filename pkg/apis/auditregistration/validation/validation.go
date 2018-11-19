@@ -19,6 +19,7 @@ package validation
 import (
 	"strings"
 
+	"k8s.io/apimachinery/pkg/api/validation"
 	genericvalidation "k8s.io/apimachinery/pkg/api/validation"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/validation/field"
@@ -80,6 +81,44 @@ func ValidatePolicy(policy auditregistration.Policy, fldPath *field.Path) field.
 	if policy.Level != auditregistration.LevelNone && len(policy.Stages) == 0 {
 		return field.ErrorList{field.Required(fldPath.Child("stages"), "")}
 	}
+	for _, rule := range policy.ClassRules {
+		allErrs = append(allErrs, validateClassRule(rule, fldPath.Child("classRules"))...)
+	}
+	return allErrs
+}
+
+func validateClassRule(classRule auditregistration.ClassRule, fldPath *field.Path) field.ErrorList {
+	var allErrs field.ErrorList
+	if classRule.Name == "" {
+		allErrs = append(allErrs, field.Invalid(fldPath.Child("name"), classRule.Name, "name cannot be blank"))
+	}
+	allErrs = append(allErrs, validateLevel(classRule.Level, fldPath.Child("level"))...)
+	allErrs = append(allErrs, validateStages(classRule.Stages, fldPath.Child("stages"))...)
+
+	return allErrs
+}
+
+// ValidateAuditClass validates the AuditClass
+func ValidateAuditClass(class auditregistration.AuditClass) field.ErrorList {
+	var allErrs field.ErrorList
+	fldPath := field.NewPath("spec")
+	for _, attrGroup := range class.Spec.AttributeGroups {
+		allErrs = append(allErrs, validateAttributeGroup(attrGroup, fldPath.Child("attributeGroups"))...)
+	}
+	return allErrs
+}
+
+func validateAttributeGroup(attrGroup auditregistration.AttributeGroup, fldPath *field.Path) field.ErrorList {
+	var allErrs field.ErrorList
+	allErrs = append(allErrs, validateNonResourceURLs(attrGroup.NonResourceURLs, fldPath.Child("nonResourceURLs"))...)
+	allErrs = append(allErrs, validateResources(attrGroup.Resources, fldPath.Child("resources"))...)
+
+	if len(attrGroup.NonResourceURLs) > 0 {
+		if len(attrGroup.Resources) > 0 || len(attrGroup.Namespaces) > 0 {
+			allErrs = append(allErrs, field.Invalid(fldPath.Child("nonResourceURLs"), attrGroup.NonResourceURLs, "groups cannot contain to both regular resources and non-resource URLs"))
+		}
+	}
+
 	return allErrs
 }
 
@@ -112,6 +151,45 @@ func validateStages(stages []auditregistration.Stage, fldPath *field.Path) field
 	for i, stage := range stages {
 		if !validStages.Has(string(stage)) {
 			allErrs = append(allErrs, field.Invalid(fldPath.Index(i), string(stage), "allowed stages are "+strings.Join(validStages.List(), ",")))
+		}
+	}
+	return allErrs
+}
+
+func validateNonResourceURLs(urls []string, fldPath *field.Path) field.ErrorList {
+	var allErrs field.ErrorList
+	for i, url := range urls {
+		if url == "*" {
+			continue
+		}
+
+		if !strings.HasPrefix(url, "/") {
+			allErrs = append(allErrs, field.Invalid(fldPath.Index(i), url, "non-resource URL rules must begin with a '/' character"))
+		}
+
+		if url != "" && strings.ContainsRune(url[:len(url)-1], '*') {
+			allErrs = append(allErrs, field.Invalid(fldPath.Index(i), url, "non-resource URL wildcards '*' must be the final character of the rule"))
+		}
+	}
+	return allErrs
+}
+
+func validateResources(groupResources []auditregistration.GroupResources, fldPath *field.Path) field.ErrorList {
+	var allErrs field.ErrorList
+	for _, groupResource := range groupResources {
+		// The empty string represents the core API group.
+		if len(groupResource.Group) != 0 {
+			// Group names must be lower case and be valid DNS subdomains.
+			// reference: https://github.com/kubernetes/community/blob/master/contributors/devel/api-conventions.md
+			// an error is returned for group name like rbac.authorization.k8s.io/v1beta1
+			// rbac.authorization.k8s.io is the valid one
+			if msgs := validation.NameIsDNSSubdomain(groupResource.Group, false); len(msgs) != 0 {
+				allErrs = append(allErrs, field.Invalid(fldPath.Child("group"), groupResource.Group, strings.Join(msgs, ",")))
+			}
+		}
+
+		if len(groupResource.ResourceNames) > 0 && len(groupResource.Resources) == 0 {
+			allErrs = append(allErrs, field.Invalid(fldPath.Child("resourceNames"), groupResource.ResourceNames, "using resourceNames requires at least one resource"))
 		}
 	}
 	return allErrs
