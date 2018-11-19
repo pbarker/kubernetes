@@ -1,5 +1,5 @@
 /*
-Copyright 2018 The Kubernetes Authors.
+Copyright 2019 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -96,14 +96,41 @@ type AuditSinkList struct {
 
 // Policy defines the configuration of how audit events are logged
 type Policy struct {
-	// The Level that all requests are recorded at.
+	// Level is the base Level that all requests are recorded at.
 	// available options: None, Metadata, Request, RequestResponse
 	// required
 	Level Level `json:"level" protobuf:"bytes,1,opt,name=level"`
 
 	// Stages is a list of stages for which events are created.
+	// If no stages are given nothing will be logged
 	// +optional
 	Stages []Stage `json:"stages" protobuf:"bytes,2,opt,name=stages"`
+
+	// PolicyRules define how classes should be handled.
+	// A request may fall under multiple audit classes.
+	// Rules are evaluated in order (first matching wins).
+	// Rules override the top Level & Stage.
+	// Unmatched requests use the top level rule.
+	// +optional
+	Rules []PolicyRule `json:"rules" protobuf:"bytes,3,opt,name=rules"`
+}
+
+// PolicyRule defines how a class is handled per sink
+type PolicyRule struct {
+	// AuditClassName of the AuditClass object. This rule matches requests that are
+	// classified with this AuditClass
+	AuditClassName string `json:"auditClassName" protobuf:"bytes,1,opt,name=auditClassName"`
+
+	// Level is the Level that all requests this rule applies to are recorded at.
+	// available options: None, Metadata, Request, RequestResponse
+	// This will override the parent Policy Level.
+	// required
+	Level Level `json:"level" protobuf:"bytes,2,opt,name=level"`
+
+	// Stages is a list of stages for which events are created.
+	// If no stages are given nothing will be logged
+	// +optional
+	Stages []Stage `json:"stages" protobuf:"bytes,3,opt,name=stages"`
 }
 
 // Webhook holds the configuration of the webhook
@@ -191,4 +218,108 @@ type ServiceReference struct {
 	// this service.
 	// +optional
 	Path *string `json:"path,omitempty" protobuf:"bytes,3,opt,name=path"`
+}
+
+// +genclient
+// +genclient:nonNamespaced
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+
+// AuditClass is a set of rules that categorize requests
+//
+// This should be considered a highly privileged object, as modifying it
+// will change what is logged.
+type AuditClass struct {
+	metav1.TypeMeta `json:",inline"`
+	// +optional
+	metav1.ObjectMeta `json:"metadata,omitempty" protobuf:"bytes,1,opt,name=metadata"`
+
+	// Spec is the spec for the audit class
+	Spec AuditClassSpec `json:"spec,omitempty" protobuf:"bytes,2,opt,name=spec"`
+}
+
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+
+// AuditClassList is a list of AuditClass items
+type AuditClassList struct {
+	metav1.TypeMeta `json:",inline"`
+	// +optional
+	metav1.ListMeta `json:"metadata,omitempty" protobuf:"bytes,1,opt,name=metadata"`
+
+	// List of audit classes
+	Items []AuditClass `json:"items" protobuf:"bytes,2,rep,name=items"`
+}
+
+// AuditClassSpec is the spec for the audit class
+type AuditClassSpec struct {
+	// RequestSelectors defines a list of RequestSelectors
+	RequestSelectors []RequestSelector `json:"requestSelectors,omitempty" protobuf:"bytes,1,opt,name=requestSelectors"`
+}
+
+// RequestSelector selects requests by matching on the given fields. Selectors are
+// used to compose audit classes.
+type RequestSelector struct {
+	// The users (by authenticated user name) in this attribute group.
+	// An empty list implies every user.
+	// +optional
+	Users []string `json:"users,omitempty" protobuf:"bytes,2,rep,name=users"`
+	// The user groups in this attribute group. A user is considered matching
+	// if it is a member of any of the UserGroups.
+	// An empty list implies every user group.
+	// +optional
+	UserGroups []string `json:"userGroups,omitempty" protobuf:"bytes,3,rep,name=userGroups"`
+
+	// The verbs included in this attribute group.
+	// An empty list implies every verb.
+	// +optional
+	Verbs []string `json:"verbs,omitempty" protobuf:"bytes,4,rep,name=verbs"`
+
+	// Attribute groups can apply to API resources (such as "pods" or "secrets"),
+	// non-resource URL paths (such as "/api"), or neither, but not both.
+	// If neither is specified, the attribute group is treated as a default for all URLs.
+
+	// Resources in this attribute group. An empty list implies all kinds in all API groups.
+	// +optional
+	Resources []GroupResources `json:"resources,omitempty" protobuf:"bytes,5,rep,name=resources"`
+	// Namespaces in this attribute group.
+	// The empty string "" matches non-namespaced resources.
+	// An empty list implies every namespace.
+	// Non-namespaced resources will only be matched if the empty string is present in the list
+	// +optional
+	Namespaces []string `json:"namespaces,omitempty" protobuf:"bytes,6,rep,name=namespaces"`
+
+	// NonResourceURLs is a set of URL paths that should be audited.
+	// *s are allowed, but only as the full, final step in the path, and are delimited by the path separator
+	// Examples:
+	//  "/metrics" - Log requests for apiserver metrics
+	//  "/healthz/*" - Log all health checks
+	// +optional
+	NonResourceURLs []string `json:"nonResourceURLs,omitempty" protobuf:"bytes,7,rep,name=nonResourceURLs"`
+}
+
+// GroupResources represents resource kinds in an API group.
+type GroupResources struct {
+	// Group is the name of the API group that contains the resources.
+	// The empty string represents the core API group.
+	// +optional
+	Group string `json:"group,omitempty" protobuf:"bytes,1,opt,name=group"`
+	// Resources is a list of resources in this group.
+	//
+	// For example:
+	// 'pods' matches pods.
+	// 'pods/log' matches the log subresource of pods.
+	// '*' matches all resources and their subresources.
+	// 'pods/*' matches all subresources of pods.
+	// '*/scale' matches all scale subresources.
+	//
+	// If wildcard is present, the validation rule will ensure resources do not
+	// overlap with each other.
+	//
+	// An empty list implies all resources and subresources in this API groups apply.
+	// +optional
+	Resources []string `json:"resources,omitempty" protobuf:"bytes,2,rep,name=resources"`
+	// ObjectNames is a list of resource instance names in this group.
+	// Using this field requires Resources to be specified.
+	// An empty list implies that every instance of the resource is matched.
+	// +optional
+	ObjectNames []string `json:"objectNames,omitempty" protobuf:"bytes,3,rep,name=objectNames"`
 }

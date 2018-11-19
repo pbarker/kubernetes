@@ -1,5 +1,5 @@
 /*
-Copyright 2018 The Kubernetes Authors.
+Copyright 2019 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -64,7 +64,6 @@ const (
 // AuditSink represents a cluster level sink for audit data
 type AuditSink struct {
 	metav1.TypeMeta
-
 	// +optional
 	metav1.ObjectMeta
 
@@ -74,7 +73,7 @@ type AuditSink struct {
 
 // AuditSinkSpec is the spec for the audit sink object
 type AuditSinkSpec struct {
-	// Policy defines the policy for selecting which events should be sent to the backend
+	// Policy defines the policy for selecting which events should be sent to the webhook
 	// required
 	Policy Policy
 
@@ -85,10 +84,9 @@ type AuditSinkSpec struct {
 
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 
-// AuditSinkList is a list of a	audit sink items.
+// AuditSinkList is a list of AuditSink items.
 type AuditSinkList struct {
 	metav1.TypeMeta
-
 	// +optional
 	metav1.ListMeta
 
@@ -98,17 +96,44 @@ type AuditSinkList struct {
 
 // Policy defines the configuration of how audit events are logged
 type Policy struct {
-	// The Level that all requests are recorded at.
+	// Level is the base Level that all requests are recorded at.
 	// available options: None, Metadata, Request, RequestResponse
 	// required
 	Level Level
 
 	// Stages is a list of stages for which events are created.
+	// If no stages are given, nothing will be logged
+	// +optional
+	Stages []Stage
+
+	// Rules define how classes should be handled.
+	// A request may fall under multiple audit classes.
+	// Rules are evaluated in order (first matching wins).
+	// Rules override the top Level & Stage.
+	// Unmatched requests use the top Level rule.
+	// +optional
+	Rules []PolicyRule
+}
+
+// PolicyRule defines how a class is handled per sink
+type PolicyRule struct {
+	// AuditClassName of the AuditClass object. This rule matches requests that are
+	// classified with this AuditClass
+	AuditClassName string
+
+	// Level is the Level that all requests this rule applies to are recorded at.
+	// available options: None, Metadata, Request, RequestResponse
+	// This will override the parent Policy Level.
+	// required
+	Level Level
+
+	// Stages is a list of stages for which events are created.
+	// If no stages are given, nothing will be logged
 	// +optional
 	Stages []Stage
 }
 
-// Webhook holds the configuration of the webhooks
+// Webhook holds the configuration of the webhook
 type Webhook struct {
 	// Throttle holds the options for throttling the webhook
 	// +optional
@@ -119,14 +144,14 @@ type Webhook struct {
 	ClientConfig WebhookClientConfig
 }
 
-// WebhookThrottleConfig holds the configuration for throttling
+// WebhookThrottleConfig holds the configuration for throttling events
 type WebhookThrottleConfig struct {
-	// QPS maximum number of batches per second
+	// ThrottleQPS maximum number of batches per second
 	// default 10 QPS
 	// +optional
 	QPS *int64
 
-	// Burst is the maximum number of events sent at the same moment
+	// ThrottleBurst is the maximum number of events sent at the same moment
 	// default 15 QPS
 	// +optional
 	Burst *int64
@@ -193,4 +218,108 @@ type ServiceReference struct {
 	// this service.
 	// +optional
 	Path *string
+}
+
+// +genclient
+// +genclient:nonNamespaced
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+
+// AuditClass is a set of rules that categorize requests
+//
+// This should be considered a highly privileged object, as modifying it
+// will change what is logged.
+type AuditClass struct {
+	metav1.TypeMeta
+	// +optional
+	metav1.ObjectMeta
+
+	// Spec is the spec for the audit class
+	Spec AuditClassSpec
+}
+
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+
+// AuditClassList is a list of AuditClass items
+type AuditClassList struct {
+	metav1.TypeMeta
+	// +optional
+	metav1.ListMeta
+
+	// List of audit classes
+	Items []AuditClass
+}
+
+// AuditClassSpec is the spec for the audit class
+type AuditClassSpec struct {
+	// RequestSelectors defines a list of RequestSelectors
+	RequestSelectors []RequestSelector
+}
+
+// RequestSelector selects requests by matching on the given attributes. Selectors are
+// used to compose audit classes.
+type RequestSelector struct {
+	// The users (by authenticated user name) in this attribute group.
+	// An empty list implies every user.
+	// +optional
+	Users []string
+	// The user groups in this attribute group. A user is considered matching
+	// if it is a member of any of the UserGroups.
+	// An empty list implies every user group.
+	// +optional
+	UserGroups []string
+
+	// The verbs included in this attribute group.
+	// An empty list implies every verb.
+	// +optional
+	Verbs []string
+
+	// Attribute groups can apply to API resources (such as "pods" or "secrets"),
+	// non-resource URL paths (such as "/api"), or neither, but not both.
+	// If neither is specified, the attribute group is treated as a default for all URLs.
+
+	// Resources in this attribute group. An empty list implies all kinds in all API groups.
+	// +optional
+	Resources []GroupResources
+	// Namespaces in this attribute group.
+	// The empty string "" matches non-namespaced resources.
+	// An empty list implies every namespace.
+	// Non-namespaced resources will only be matched if the empty string is present in the list
+	// +optional
+	Namespaces []string
+
+	// NonResourceURLs is a set of URL paths that should be audited.
+	// *s are allowed, but only as the full, final step in the path, and are delimited by the path separator
+	// Examples:
+	//  "/metrics" - Log requests for apiserver metrics
+	//  "/healthz/*" - Log all health checks
+	// +optional
+	NonResourceURLs []string
+}
+
+// GroupResources represents resource kinds in an API group.
+type GroupResources struct {
+	// Group is the name of the API group that contains the resources.
+	// The empty string represents the core API group.
+	// +optional
+	Group string
+	// Resources is a list of resources in this group.
+	//
+	// For example:
+	// 'pods' matches pods.
+	// 'pods/log' matches the log subresource of pods.
+	// '*' matches all resources and their subresources.
+	// 'pods/*' matches all subresources of pods.
+	// '*/scale' matches all scale subresources.
+	//
+	// If wildcard is present, the validation rule will ensure resources do not
+	// overlap with each other.
+	//
+	// An empty list implies all resources and subresources in this API groups apply.
+	// +optional
+	Resources []string
+	// ObjectNames is a list of resource instance names in this group.
+	// Using this field requires Resources to be specified.
+	// An empty list implies that every instance of the resource is matched.
+	// +optional
+	ObjectNames []string
 }
