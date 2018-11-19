@@ -1099,7 +1099,8 @@
     "description": "Policy defines the configuration of how audit events are logged",
     "required": [
      "level",
-     "stages"
+     "stages",
+     "rules"
     ],
     "properties": {
      "level": {
@@ -1111,13 +1112,46 @@
       "items": {
        "$ref": "v1alpha1.Stage"
       },
-      "description": "Stages is a list of stages for which events are created."
+      "description": "Stages is a list of stages for which events are created. Must be non-empty if level != none"
+     },
+     "rules": {
+      "type": "array",
+      "items": {
+       "$ref": "v1alpha1.PolicyRule"
+      },
+      "description": "PolicyRules define how classes should be handled. A request may fall under multiple audit classes. Rules are evaluated in order (first matching wins). Rules override the top-level \u0026 stage. Unmatched requests use the top-level rule."
      }
     }
    },
    "v1alpha1.Stage": {
     "id": "v1alpha1.Stage",
     "properties": {}
+   },
+   "v1alpha1.PolicyRule": {
+    "id": "v1alpha1.PolicyRule",
+    "description": "PolicyRule defines how a class is handled per sink",
+    "required": [
+     "className",
+     "level",
+     "stages"
+    ],
+    "properties": {
+     "className": {
+      "type": "string",
+      "description": "ClassName of the AuditClass object. This rule matches requests that are classified with this AuditClass"
+     },
+     "level": {
+      "type": "string",
+      "description": "The Level that all requests are recorded at. available options: None, Metadata, Request, RequestResponse required"
+     },
+     "stages": {
+      "type": "array",
+      "items": {
+       "$ref": "v1alpha1.Stage"
+      },
+      "description": "Stages is a list of stages for which events are created. If no stages are given nothing will be logged"
+     }
+    }
    },
    "v1alpha1.Webhook": {
     "id": "v1alpha1.Webhook",
