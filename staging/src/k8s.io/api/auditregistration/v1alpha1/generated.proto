@@ -28,6 +28,33 @@ import "k8s.io/apimachinery/pkg/runtime/schema/generated.proto";
 // Package-wide variables from generator "generated".
 option go_package = "v1alpha1";
 
+// AuditClass is a set of rules that categorize requests
+//
+// This should be considered a highly privileged object, as modifying it
+// will change what is logged.
+message AuditClass {
+  // +optional
+  optional k8s.io.apimachinery.pkg.apis.meta.v1.ObjectMeta metadata = 1;
+
+  // Spec is the spec for the audit class
+  optional AuditClassSpec spec = 2;
+}
+
+// AuditClassList is a list of AuditClass items
+message AuditClassList {
+  // +optional
+  optional k8s.io.apimachinery.pkg.apis.meta.v1.ListMeta metadata = 1;
+
+  // List of audit classes
+  repeated AuditClass items = 2;
+}
+
+// AuditClassSpec is the spec for the audit class
+message AuditClassSpec {
+  // RequestSelectors defines a list of RequestSelectors
+  repeated RequestSelector requestSelectors = 1;
+}
+
 // AuditSink represents a cluster level audit sink
 message AuditSink {
   // +optional
@@ -57,16 +84,112 @@ message AuditSinkSpec {
   optional Webhook webhook = 2;
 }
 
+// GroupResources represents resource kinds in an API group.
+message GroupResources {
+  // Group is the name of the API group that contains the resources.
+  // The empty string represents the core API group.
+  // +optional
+  optional string group = 1;
+
+  // Resources is a list of resources in this group.
+  //
+  // For example:
+  // 'pods' matches pods.
+  // 'pods/log' matches the log subresource of pods.
+  // '*' matches all resources and their subresources.
+  // 'pods/*' matches all subresources of pods.
+  // '*/scale' matches all scale subresources.
+  //
+  // If wildcard is present, the validation rule will ensure resources do not
+  // overlap with each other.
+  //
+  // An empty list implies all resources and subresources in this API groups apply.
+  // +optional
+  repeated string resources = 2;
+
+  // ObjectNames is a list of resource instance names in this group.
+  // Using this field requires Resources to be specified.
+  // An empty list implies that every instance of the resource is matched.
+  // +optional
+  repeated string objectNames = 3;
+}
+
 // Policy defines the configuration of how audit events are logged
 message Policy {
-  // The Level that all requests are recorded at.
+  // Level is the base Level that all requests are recorded at.
   // available options: None, Metadata, Request, RequestResponse
   // required
   optional string level = 1;
 
   // Stages is a list of stages for which events are created.
+  // If no stages are given nothing will be logged
   // +optional
   repeated string stages = 2;
+
+  // PolicyRules define how classes should be handled.
+  // A request may fall under multiple audit classes.
+  // Rules are evaluated in order (first matching wins).
+  // Rules override the top Level & Stage.
+  // Unmatched requests use the top level rule.
+  // +optional
+  repeated PolicyRule rules = 3;
+}
+
+// PolicyRule defines how a class is handled per sink
+message PolicyRule {
+  // AuditClassName of the AuditClass object. This rule matches requests that are
+  // classified with this AuditClass
+  optional string auditClassName = 1;
+
+  // Level is the Level that all requests this rule applies to are recorded at.
+  // available options: None, Metadata, Request, RequestResponse
+  // This will override the parent Policy Level.
+  // required
+  optional string level = 2;
+
+  // Stages is a list of stages for which events are created.
+  // If no stages are given nothing will be logged
+  // +optional
+  repeated string stages = 3;
+}
+
+// RequestSelector selects requests by matching on the given fields. Selectors are
+// used to compose audit classes.
+message RequestSelector {
+  // The users (by authenticated user name) in this attribute group.
+  // An empty list implies every user.
+  // +optional
+  repeated string users = 2;
+
+  // The user groups in this attribute group. A user is considered matching
+  // if it is a member of any of the UserGroups.
+  // An empty list implies every user group.
+  // +optional
+  repeated string userGroups = 3;
+
+  // The verbs included in this attribute group.
+  // An empty list implies every verb.
+  // +optional
+  repeated string verbs = 4;
+
+  // Resources in this attribute group. An empty list implies all kinds in all API groups.
+  // +optional
+  repeated GroupResources resources = 5;
+
+  // Namespaces in this attribute group.
+  // The empty string "" matches non-namespaced resources.
+  // An empty list implies every namespace.
+  // Non-namespaced resources will only be matched if the empty string is present in the list
+  // +optional
+  repeated string namespaces = 6;
+
+  // NonResourceURLs is a set of URL paths that should be audited.
+  // *s are allowed, but only as the full, final step in the path, and are delimited by the path separator
+  // Examples:
+  //  "/metrics" - Log requests for apiserver metrics
+  //  "/healthz/*" - Log all health checks
+  // +optional
+  repeated string nonResourceURLs = 7;
 }
 
 // ServiceReference holds a reference to Service.legacy.k8s.io

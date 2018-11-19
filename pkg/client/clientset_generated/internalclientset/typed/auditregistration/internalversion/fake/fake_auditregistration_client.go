@@ -28,6 +28,10 @@ type FakeAuditregistration struct {
 	*testing.Fake
 }
 
+func (c *FakeAuditregistration) AuditClasses() internalversion.AuditClassInterface {
+	return &FakeAuditClasses{c}
+}
+
 func (c *FakeAuditregistration) AuditSinks() internalversion.AuditSinkInterface {
 	return &FakeAuditSinks{c}
 }
