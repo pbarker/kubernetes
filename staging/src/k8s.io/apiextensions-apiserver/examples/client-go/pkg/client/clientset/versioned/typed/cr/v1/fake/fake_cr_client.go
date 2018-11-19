@@ -28,8 +28,12 @@ type FakeCrV1 struct {
 	*testing.Fake
 }
 
-func (c *FakeCrV1) Examples(namespace string) v1.ExampleInterface {
-	return &FakeExamples{c, namespace}
+func (c *FakeAuditregistration) AuditClasses() internalversion.AuditClassInterface {
+	return &FakeAuditClasses{c}
+}
+
+func (c *FakeAuditregistration) AuditSinks() internalversion.AuditSinkInterface {
+	return &FakeAuditSinks{c}
 }
 
 // RESTClient returns a RESTClient that is used to communicate

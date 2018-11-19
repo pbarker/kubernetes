@@ -18,4 +18,6 @@ limitations under the License.
 
 package internalversion
 
-type TestTypeExpansion interface{}
+type AuditClassExpansion interface{}
+
+type AuditSinkExpansion interface{}

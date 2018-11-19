@@ -25,7 +25,8 @@ import (
 
 type ApiregistrationInterface interface {
 	RESTClient() rest.Interface
-	APIServicesGetter
+	AuditClassesGetter
+	AuditSinksGetter
 }
 
 // ApiregistrationClient is used to interact with features provided by the apiregistration.k8s.io group.
@@ -33,8 +34,12 @@ type ApiregistrationClient struct {
 	restClient rest.Interface
 }
 
-func (c *ApiregistrationClient) APIServices() APIServiceInterface {
-	return newAPIServices(c)
+func (c *AuditregistrationClient) AuditClasses() AuditClassInterface {
+	return newAuditClasses(c)
+}
+
+func (c *AuditregistrationClient) AuditSinks() AuditSinkInterface {
+	return newAuditSinks(c)
 }
 
 // NewForConfig creates a new ApiregistrationClient for the given config.

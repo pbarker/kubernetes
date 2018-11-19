@@ -4,8 +4,9 @@ go_library(
     name = "go_default_library",
     srcs = [
         "doc.go",
-        "fake_node_client.go",
-        "fake_runtimeclass.go",
+        "fake_auditclass.go",
+        "fake_auditregistration_client.go",
+        "fake_auditsink.go",
     ],
     importmap = "k8s.io/kubernetes/vendor/k8s.io/client-go/kubernetes/typed/node/v1beta1/fake",
     importpath = "k8s.io/client-go/kubernetes/typed/node/v1beta1/fake",
