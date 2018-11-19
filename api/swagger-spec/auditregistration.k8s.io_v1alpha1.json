@@ -1099,7 +1099,8 @@
     "description": "Policy defines the configuration of how audit events are logged",
     "required": [
      "level",
-     "stages"
+     "stages",
+     "classRules"
     ],
     "properties": {
      "level": {
@@ -1112,12 +1113,45 @@
        "$ref": "v1alpha1.Stage"
       },
       "description": "Stages is a list of stages for which events are created."
+     },
+     "classRules": {
+      "type": "array",
+      "items": {
+       "$ref": "v1alpha1.ClassRule"
+      },
+      "description": "ClassRules define how classes should be handled"
      }
     }
    },
    "v1alpha1.Stage": {
     "id": "v1alpha1.Stage",
     "properties": {}
+   },
+   "v1alpha1.ClassRule": {
+    "id": "v1alpha1.ClassRule",
+    "description": "ClassRule defines how a class is handled per sink",
+    "required": [
+     "name",
+     "level",
+     "stages"
+    ],
+    "properties": {
+     "name": {
+      "type": "string",
+      "description": "Name of the AuditClass object"
+     },
+     "level": {
+      "type": "string",
+      "description": "The Level that all requests are recorded at. available options: None, Metadata, Request, RequestResponse required"
+     },
+     "stages": {
+      "type": "array",
+      "items": {
+       "$ref": "v1alpha1.Stage"
+      },
+      "description": "Stages is a list of stages for which events are created."
+     }
+    }
    },
    "v1alpha1.Webhook": {
     "id": "v1alpha1.Webhook",

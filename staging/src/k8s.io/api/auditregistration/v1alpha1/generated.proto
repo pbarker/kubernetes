@@ -28,6 +28,55 @@ import "k8s.io/apimachinery/pkg/runtime/schema/generated.proto";
 // Package-wide variables from generator "generated".
 option go_package = "v1alpha1";
 
+// AuditClass is a set of rules that categorize requests
+message AuditClass {
+  // +optional
+  optional k8s.io.apimachinery.pkg.apis.meta.v1.ObjectMeta metadata = 1;
+
+  // The users (by authenticated user name) this rule applies to.
+  // An empty list implies every user.
+  // +optional
+  repeated string users = 2;
+
+  // The user groups this rule applies to. A user is considered matching
+  // if it is a member of any of the UserGroups.
+  // An empty list implies every user group.
+  // +optional
+  repeated string userGroups = 3;
+
+  // The verbs that match this rule.
+  // An empty list implies every verb.
+  // +optional
+  repeated string verbs = 4;
+
+  // Resources that this rule matches. An empty list implies all kinds in all API groups.
+  // +optional
+  repeated GroupResources resources = 5;
+
+  // Namespaces that this rule matches.
+  // The empty string "" matches non-namespaced resources.
+  // An empty list implies every namespace.
+  // +optional
+  repeated string namespaces = 6;
+
+  // NonResourceURLs is a set of URL paths that should be audited.
+  // *s are allowed, but only as the full, final step in the path.
+  // Examples:
+  //  "/metrics" - Log requests for apiserver metrics
+  //  "/healthz*" - Log all health checks
+  // +optional
+  repeated string nonResourceURLs = 7;
+}
+
+// AuditClassList is a list of AuditClass items
+message AuditClassList {
+  // +optional
+  optional k8s.io.apimachinery.pkg.apis.meta.v1.ListMeta metadata = 1;
+
+  // List of audit classes
+  repeated AuditClass items = 2;
+}
+
 // AuditSink represents a cluster level audit sink
 message AuditSink {
   // +optional
@@ -57,6 +106,51 @@ message AuditSinkSpec {
   optional Webhook webhook = 2;
 }
 
+// ClassRule defines how a class is handled per sink
+message ClassRule {
+  // Name of the AuditClass object
+  optional string name = 1;
+
+  // The Level that all requests are recorded at.
+  // available options: None, Metadata, Request, RequestResponse
+  // required
+  optional string level = 2;
+
+  // Stages is a list of stages for which events are created.
+  // +optional
+  repeated string stages = 3;
+}
+
+// GroupResources represents resource kinds in an API group.
+message GroupResources {
+  // Group is the name of the API group that contains the resources.
+  // The empty string represents the core API group.
+  // +optional
+  optional string group = 1;
+
+  // Resources is a list of resources this rule applies to.
+  //
+  // For example:
+  // 'pods' matches pods.
+  // 'pods/log' matches the log subresource of pods.
+  // '*' matches all resources and their subresources.
+  // 'pods/*' matches all subresources of pods.
+  // '*/scale' matches all scale subresources.
+  //
+  // If wildcard is present, the validation rule will ensure resources do not
+  // overlap with each other.
+  //
+  // An empty list implies all resources and subresources in this API groups apply.
+  // +optional
+  repeated string resources = 2;
+
+  // ResourceNames is a list of resource instance names that the policy matches.
+  // Using this field requires Resources to be specified.
+  // An empty list implies that every instance of the resource is matched.
+  // +optional
+  repeated string resourceNames = 3;
+}
+
 // Policy defines the configuration of how audit events are logged
 message Policy {
   // The Level that all requests are recorded at.
@@ -67,6 +161,10 @@ message Policy {
   // Stages is a list of stages for which events are created.
   // +optional
   repeated string stages = 2;
+
+  // ClassRules define how classes should be handled
+  // +optional
+  repeated ClassRule classRules = 3;
 }
 
 // ServiceReference holds a reference to Service.legacy.k8s.io
