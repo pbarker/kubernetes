@@ -1626,7 +1626,8 @@ function start-kube-apiserver {
     create-master-audit-policy "${audit_policy_file}" "${ADVANCED_AUDIT_POLICY:-}"
     audit_policy_config_mount="{\"name\": \"auditpolicyconfigmount\",\"mountPath\": \"${audit_policy_file}\", \"readOnly\": true},"
     audit_policy_config_volume="{\"name\": \"auditpolicyconfigmount\",\"hostPath\": {\"path\": \"${audit_policy_file}\", \"type\": \"FileOrCreate\"}},"
-
+    # always set dynamic configuration, as it is also feature gated
+    params+=" --audit-dynamic-configuration"
     if [[ "${ADVANCED_AUDIT_BACKEND:-log}" == *"log"* ]]; then
       # The advanced audit log backend config matches the basic audit log config.
       params+=" --audit-log-path=/var/log/kube-apiserver-audit.log"

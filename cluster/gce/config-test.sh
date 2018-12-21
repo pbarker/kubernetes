@@ -379,9 +379,6 @@ else
 fi
 
 ENABLE_APISERVER_DYNAMIC_AUDIT="${ENABLE_APISERVER_DYNAMIC_AUDIT:-true}" # true, false
-if [[ -z "${ENABLE_APISERVER_DYNAMIC_AUDIT:-}" ]]; then
-    FEATURE_GATES="${FEATURE_GATES},DynamicAuditing=true"
-fi
 
 # Optional: if set to true kube-up will automatically check for existing resources and clean them up.
 KUBE_UP_AUTOMATIC_CLEANUP=${KUBE_UP_AUTOMATIC_CLEANUP:-false}
