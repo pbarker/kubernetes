@@ -9,6 +9,7 @@ go_library(
     name = "go_default_library",
     srcs = [
         "audit.go",
+        "audit_dynamic.go",
         "certificates.go",
         "framework.go",
         "metadata_concealment.go",
@@ -27,6 +28,7 @@ go_library(
         "//plugin/pkg/admission/serviceaccount:go_default_library",
         "//staging/src/k8s.io/api/apps/v1:go_default_library",
         "//staging/src/k8s.io/api/authentication/v1:go_default_library",
+        "//staging/src/k8s.io/api/auditregistration/v1alpha1:go_default_library",
         "//staging/src/k8s.io/api/batch/v1:go_default_library",
         "//staging/src/k8s.io/api/certificates/v1beta1:go_default_library",
         "//staging/src/k8s.io/api/core/v1:go_default_library",
@@ -39,10 +41,15 @@ go_library(
         "//staging/src/k8s.io/apimachinery/pkg/apis/meta/v1:go_default_library",
         "//staging/src/k8s.io/apimachinery/pkg/runtime/schema:go_default_library",
         "//staging/src/k8s.io/apimachinery/pkg/types:go_default_library",
+<<<<<<< HEAD
         "//staging/src/k8s.io/apimachinery/pkg/util/sets:go_default_library",
+=======
+        "//staging/src/k8s.io/apimachinery/pkg/util/intstr:go_default_library",
+>>>>>>> update build
         "//staging/src/k8s.io/apimachinery/pkg/util/uuid:go_default_library",
         "//staging/src/k8s.io/apimachinery/pkg/util/wait:go_default_library",
         "//staging/src/k8s.io/apiserver/pkg/apis/audit:go_default_library",
+        "//staging/src/k8s.io/apiserver/pkg/apis/audit/v1:go_default_library",
         "//staging/src/k8s.io/apiserver/pkg/apis/audit/v1beta1:go_default_library",
         "//staging/src/k8s.io/apiserver/pkg/authentication/serviceaccount:go_default_library",
         "//staging/src/k8s.io/client-go/kubernetes:go_default_library",
