@@ -22,8 +22,10 @@ import (
 	"time"
 
 	. "github.com/onsi/ginkgo"
+
 	auditregv1alpha1 "k8s.io/api/auditregistration/v1alpha1"
 	apiv1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
@@ -39,9 +41,9 @@ import (
 
 var _ = SIGDescribe("[Feature:DynamicAudit]", func() {
 	f := framework.NewDefaultFramework("audit")
-	BeforeEach(func() {
-		framework.SkipUnlessProviderIs("gce")
-	})
+	// BeforeEach(func() {
+	// 	framework.SkipUnlessProviderIs("gce")
+	// })
 
 	// TODO: Get rid of [DisabledForLargeClusters] when feature request #53455 is ready.
 	It("should dynamically audit API calls [DisabledForLargeClusters]", func() {
@@ -65,7 +67,7 @@ var _ = SIGDescribe("[Feature:DynamicAudit]", func() {
 		})
 		framework.ExpectNoError(err, "failed to create namespace")
 
-		_, err = f.ClientSet.CoreV1().Pods("audit").Create(&apiv1.Pod{
+		_, err = f.ClientSet.CoreV1().Pods(namespace).Create(&apiv1.Pod{
 			ObjectMeta: metav1.ObjectMeta{
 				Name: "audit-proxy",
 				Labels: map[string]string{
@@ -75,8 +77,9 @@ var _ = SIGDescribe("[Feature:DynamicAudit]", func() {
 			Spec: apiv1.PodSpec{
 				Containers: []apiv1.Container{
 					apiv1.Container{
-						Name:  "proxy",
-						Image: imageutils.GetE2EImage(imageutils.AuditProxy),
+						Name: "proxy",
+						// Image: imageutils.GetE2EImage(imageutils.AuditProxy),
+						Image: "grillz/audit-proxy:1.0",
 						Ports: []apiv1.ContainerPort{
 							apiv1.ContainerPort{
 								ContainerPort: 8080,
@@ -88,7 +91,7 @@ var _ = SIGDescribe("[Feature:DynamicAudit]", func() {
 		})
 		framework.ExpectNoError(err, "failed to create proxy pod")
 
-		_, err = f.ClientSet.CoreV1().Services("audit").Create(&apiv1.Service{
+		_, err = f.ClientSet.CoreV1().Services(namespace).Create(&apiv1.Service{
 			ObjectMeta: metav1.ObjectMeta{
 				Name: "audit",
 			},
@@ -109,6 +112,24 @@ var _ = SIGDescribe("[Feature:DynamicAudit]", func() {
 		config, err = framework.LoadConfig()
 		framework.ExpectNoError(err, "failed to load config")
 
+		var podIP string
+		// get pod ip
+		err = wait.Poll(100*time.Millisecond, 10*time.Second, func() (done bool, err error) {
+			p, err := f.ClientSet.CoreV1().Pods(namespace).Get("audit-proxy", metav1.GetOptions{})
+			if errors.IsNotFound(err) {
+				return false, nil
+			} else if err != nil {
+				return false, err
+			}
+			podIP = p.Status.PodIP
+			if podIP == "" {
+				return false, nil
+			}
+			return true, nil
+		})
+		framework.ExpectNoError(err, "could not look up pod ip")
+
+		podURL := fmt.Sprintf("http://%s:8080", podIP)
 		// create audit sink
 		sink := auditregv1alpha1.AuditSink{
 			ObjectMeta: metav1.ObjectMeta{
@@ -126,10 +147,7 @@ var _ = SIGDescribe("[Feature:DynamicAudit]", func() {
 				},
 				Webhook: auditregv1alpha1.Webhook{
 					ClientConfig: auditregv1alpha1.WebhookClientConfig{
-						Service: &auditregv1alpha1.ServiceReference{
-							Name:      "audit",
-							Namespace: "audit",
-						},
+						URL: &podURL,
 					},
 				},
 			},
@@ -138,7 +156,23 @@ var _ = SIGDescribe("[Feature:DynamicAudit]", func() {
 		_, err = f.ClientSet.AuditregistrationV1alpha1().AuditSinks().Create(&sink)
 		framework.ExpectNoError(err, "failed to create audit sink")
 		framework.Logf("created audit sink")
+		fmt.Println("created audit sink")
 
+		// check that we are receiving logs in the proxy
+		err = wait.Poll(100*time.Millisecond, 10*time.Second, func() (done bool, err error) {
+			logs, err := framework.GetPodLogs(f.ClientSet, namespace, "audit-proxy", "proxy")
+			if err != nil {
+				fmt.Println("could not get pod logs: ", err)
+				return false, nil
+			}
+			if logs == "" {
+				return false, nil
+			}
+			return true, nil
+		})
+		framework.ExpectNoError(err, "failed to get logs from sink")
+
+		auditTestUser = "kubernetes-admin"
 		testCases := []struct {
 			action func()
 			events []utils.AuditEvent
@@ -193,7 +227,7 @@ var _ = SIGDescribe("[Feature:DynamicAudit]", func() {
 						ResponseObject:    true,
 						AuthorizeDecision: "allow",
 					}, {
-						Level:             auditinternal.LevelRequest,
+						Level:             auditinternal.LevelRequestResponse,
 						Stage:             auditinternal.StageResponseComplete,
 						RequestURI:        fmt.Sprintf("/api/v1/namespaces/%s/pods/audit-pod", namespace),
 						Verb:              "get",
@@ -202,10 +236,10 @@ var _ = SIGDescribe("[Feature:DynamicAudit]", func() {
 						Resource:          "pods",
 						Namespace:         namespace,
 						RequestObject:     false,
-						ResponseObject:    false,
+						ResponseObject:    true,
 						AuthorizeDecision: "allow",
 					}, {
-						Level:             auditinternal.LevelRequest,
+						Level:             auditinternal.LevelRequestResponse,
 						Stage:             auditinternal.StageResponseComplete,
 						RequestURI:        fmt.Sprintf("/api/v1/namespaces/%s/pods", namespace),
 						Verb:              "list",
@@ -214,12 +248,12 @@ var _ = SIGDescribe("[Feature:DynamicAudit]", func() {
 						Resource:          "pods",
 						Namespace:         namespace,
 						RequestObject:     false,
-						ResponseObject:    false,
+						ResponseObject:    true,
 						AuthorizeDecision: "allow",
 					}, {
-						Level:             auditinternal.LevelRequest,
+						Level:             auditinternal.LevelRequestResponse,
 						Stage:             auditinternal.StageResponseStarted,
-						RequestURI:        fmt.Sprintf("/api/v1/namespaces/%s/pods?timeoutSeconds=%d&watch=true", namespace, watchTestTimeout),
+						RequestURI:        fmt.Sprintf("/api/v1/namespaces/%s/pods?timeout=%ds&timeoutSeconds=%d&watch=true", namespace, watchTestTimeout, watchTestTimeout),
 						Verb:              "watch",
 						Code:              200,
 						User:              auditTestUser,
@@ -229,9 +263,9 @@ var _ = SIGDescribe("[Feature:DynamicAudit]", func() {
 						ResponseObject:    false,
 						AuthorizeDecision: "allow",
 					}, {
-						Level:             auditinternal.LevelRequest,
+						Level:             auditinternal.LevelRequestResponse,
 						Stage:             auditinternal.StageResponseComplete,
-						RequestURI:        fmt.Sprintf("/api/v1/namespaces/%s/pods?timeoutSeconds=%d&watch=true", namespace, watchTestTimeout),
+						RequestURI:        fmt.Sprintf("/api/v1/namespaces/%s/pods?timeout=%ds&timeoutSeconds=%d&watch=true", namespace, watchTestTimeout, watchTestTimeout),
 						Verb:              "watch",
 						Code:              200,
 						User:              auditTestUser,
@@ -295,17 +329,19 @@ var _ = SIGDescribe("[Feature:DynamicAudit]", func() {
 				},
 				[]utils.AuditEvent{
 					{
-						Level:             auditinternal.LevelRequest,
-						Stage:             auditinternal.StageResponseComplete,
-						RequestURI:        fmt.Sprintf("/api/v1/namespaces/%s/pods/another-audit-pod", namespace),
-						Verb:              "get",
-						Code:              403,
-						User:              auditTestUser,
-						Resource:          "pods",
-						Namespace:         namespace,
-						RequestObject:     false,
-						ResponseObject:    false,
-						AuthorizeDecision: "forbid",
+						Level:              auditinternal.LevelRequestResponse,
+						Stage:              auditinternal.StageResponseComplete,
+						RequestURI:         fmt.Sprintf("/api/v1/namespaces/%s/pods/another-audit-pod", namespace),
+						Verb:               "get",
+						Code:               403,
+						User:               auditTestUser,
+						ImpersonatedUser:   "system:anonymous",
+						ImpersonatedGroups: "system:unauthenticated",
+						Resource:           "pods",
+						Namespace:          namespace,
+						RequestObject:      false,
+						ResponseObject:     true,
+						AuthorizeDecision:  "forbid",
 					},
 				},
 			},
@@ -326,7 +362,7 @@ var _ = SIGDescribe("[Feature:DynamicAudit]", func() {
 		pollingTimeout := 5 * time.Minute
 		err = wait.Poll(pollingInterval, pollingTimeout, func() (bool, error) {
 			// Fetch the logs
-			logs, err := framework.GetPodLogs(f.ClientSet, "audit", "audit-proxy", "proxy")
+			logs, err := framework.GetPodLogs(f.ClientSet, namespace, "audit-proxy", "proxy")
 			if err != nil {
 				return false, err
 			}
@@ -340,8 +376,6 @@ var _ = SIGDescribe("[Feature:DynamicAudit]", func() {
 			return len(missing) == 0, nil
 		})
 		framework.ExpectNoError(err, "after %v failed to observe audit events", pollingTimeout)
-		err = f.ClientSet.CoreV1().Pods("audit").Delete("audit", &metav1.DeleteOptions{})
-		framework.ExpectNoError(err, "could not delete pod")
 		err = f.ClientSet.AuditregistrationV1alpha1().AuditSinks().Delete("test", &metav1.DeleteOptions{})
 		framework.ExpectNoError(err, "could not delete audit configuration")
 	})
