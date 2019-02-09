@@ -41,9 +41,9 @@ import (
 
 var _ = SIGDescribe("[Feature:DynamicAudit]", func() {
 	f := framework.NewDefaultFramework("audit")
-	// BeforeEach(func() {
-	// 	framework.SkipUnlessProviderIs("gce")
-	// })
+	BeforeEach(func() {
+		framework.SkipUnlessProviderIs("gce")
+	})
 
 	// TODO: Get rid of [DisabledForLargeClusters] when feature request #53455 is ready.
 	It("should dynamically audit API calls [DisabledForLargeClusters]", func() {
@@ -77,9 +77,8 @@ var _ = SIGDescribe("[Feature:DynamicAudit]", func() {
 			Spec: apiv1.PodSpec{
 				Containers: []apiv1.Container{
 					apiv1.Container{
-						Name: "proxy",
-						// Image: imageutils.GetE2EImage(imageutils.AuditProxy),
-						Image: "grillz/audit-proxy:1.0",
+						Name:  "proxy",
+						Image: imageutils.GetE2EImage(imageutils.AuditProxy),
 						Ports: []apiv1.ContainerPort{
 							apiv1.ContainerPort{
 								ContainerPort: 8080,
@@ -178,6 +177,8 @@ var _ = SIGDescribe("[Feature:DynamicAudit]", func() {
 			events []utils.AuditEvent
 		}{
 			// Create, get, update, patch, delete, list, watch pods.
+			// TODO: dedup this with the main audit test once policy functionality is available
+			// https://github.com/kubernetes/kubernetes/issues/70818
 			{
 				func() {
 					pod := &apiv1.Pod{
