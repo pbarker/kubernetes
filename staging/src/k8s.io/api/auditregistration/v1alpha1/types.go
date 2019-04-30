@@ -119,7 +119,7 @@ type Policy struct {
 type PolicyRule struct {
 	// `withAuditClass` is the name of the `auditClass` object. This rule matches requests that are
 	// classified with this `auditClass`
-	WithAuditClass string `json:"withAuthClass" protobuf:"bytes,1,opt,name=withAuditClass"`
+	WithAuditClass string `json:"withAuditClass" protobuf:"bytes,1,opt,name=withAuditClass"`
 
 	// `level` that all requests this rule applies to are recorded at.
 	// available options: None, Metadata, Request, RequestResponse
