@@ -117,6 +117,7 @@ type Policy struct {
 type PolicyRule struct {
 	// `withAuditClass` is the name of the `auditClass` object. This rule matches requests that are
 	// classified with this `auditClass`
+	// required
 	WithAuditClass string
 
 	// `level` that all requests this rule applies to are recorded at.
